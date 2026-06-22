@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --bg:#0B1120; --surface:#131B2E; --elevated:#1C2740; --border:#23304D;
+    --teal:#2DD4BF; --text:#E6EDF3; --muted:#94A3B8;
+    --high:#F87171; --med:#FBBF24; --low:#34D399;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { width:340px; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; padding:14px; }
+  .brand { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .brand svg { width:20px; height:20px; }
+  .brand h1 { font-size:14px; font-weight:700; }
+  .url-box { background:var(--surface); border:1px solid var(--border); border-radius:8px;
+             padding:9px 11px; font-size:11px; font-family:ui-monospace,monospace;
+             color:var(--muted); word-break:break-all; margin-bottom:10px; max-height:54px; overflow:auto; }
+  .btn { width:100%; background:var(--teal); color:#06281f; border:none; border-radius:8px;
+         padding:10px; font-size:13px; font-weight:700; cursor:pointer; transition:opacity .15s; }
+  .btn:hover { opacity:.9; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .result { margin-top:12px; display:none; }
+  .verdict-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .score-row { display:flex; align-items:center; gap:12px; }
+  .score { font-size:30px; font-weight:800; font-family:ui-monospace,monospace; line-height:1; }
+  .score-cap { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .pill { display:inline-block; font-size:11px; font-weight:700; padding:3px 10px; border-radius:6px;
+          text-transform:uppercase; letter-spacing:.4px; }
+  .meta { font-size:11px; color:var(--muted); margin-top:10px; line-height:1.5; }
+  .chips { margin-top:8px; display:flex; flex-wrap:wrap; gap:4px; }
+  .chip { font-size:10px; background:var(--elevated); color:var(--muted); padding:2px 8px; border-radius:5px; }
+  .spinner { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; margin-top:12px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--teal); animation:p .9s infinite; }
+  @keyframes p { 0%,100%{opacity:.3} 50%{opacity:1} }
+  .settings { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
+  .settings summary { font-size:11px; color:var(--muted); cursor:pointer; }
+  .settings input { width:100%; margin-top:7px; background:var(--bg); border:1px solid var(--border);
+                    border-radius:6px; color:var(--text); padding:7px 9px; font-size:11px; font-family:ui-monospace,monospace; }
+  .settings .save { margin-top:7px; font-size:11px; background:var(--elevated); color:var(--text);
+                    border:1px solid var(--border); border-radius:6px; padding:6px 10px; cursor:pointer; }
+  .err { color:var(--high); font-size:12px; margin-top:12px; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#2DD4BF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+    <h1>Threat Intel Scanner</h1>
+  </div>
+
+  <div class="url-box" id="urlBox">Loading current tab...</div>
+  <button class="btn" id="scanBtn">Scan this page</button>
+
+  <div id="spinner" class="spinner" style="display:none"><span class="dot"></span> Analyzing across threat sources...</div>
+  <div id="err" class="err" style="display:none"></div>
+  <div class="result" id="result"></div>
+
+  <details class="settings">
+    <summary>Backend settings</summary>
+    <input type="text" id="apiBase" placeholder="http://localhost:5000">
+    <button class="save" id="saveBtn">Save</button>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Request Access — Threat Intelligence Platform</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232DD4BF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/></svg>">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0B1120;
+            --bg-surface: #131B2E;
+            --bg-elevated: #1A2540;
+            --border: #23304D;
+            --teal: #2DD4BF;
+            --teal-dim: rgba(45,212,191,0.08);
+            --teal-border: rgba(45,212,191,0.25);
+            --text: #E6EDF3;
+            --muted: #64748B;
+            --risk-high: #F87171;
+            --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+        }
+
+        body {
+            min-height: 100vh;
+            background: var(--bg-primary);
+            font-family: var(--font);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: radial-gradient(circle, rgba(45,212,191,0.05) 1px, transparent 1px);
+            background-size: 32px 32px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .card {
+            position: relative;
+            z-index: 1;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 480px;
+            box-shadow: 0 32px 80px rgba(0,0,0,0.5);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 2rem;
+        }
+
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--teal-dim);
+            border: 1px solid var(--teal-border);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .brand-icon svg {
+            width: 18px;
+            height: 18px;
+            stroke: var(--teal);
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .brand-name {
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            color: var(--text);
+        }
+
+        .brand-badge {
+            margin-left: auto;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            font-weight: 700;
+            color: var(--teal);
+            background: var(--teal-dim);
+            border: 1px solid var(--teal-border);
+            padding: 0.2rem 0.55rem;
+            border-radius: 20px;
+        }
+
+        h1 {
+            font-size: 1.45rem;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+            margin-bottom: 0.4rem;
+        }
+
+        .subtitle {
+            font-size: 0.84rem;
+            color: var(--muted);
+            line-height: 1.55;
+            margin-bottom: 2rem;
+        }
+
+        .field {
+            margin-bottom: 1.1rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.55px;
+            color: var(--muted);
+            margin-bottom: 0.4rem;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 0.9rem;
+            padding: 0.65rem 0.9rem;
+            transition: border-color 0.15s;
+            outline: none;
+        }
+
+        input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.7; }
+        input:focus, textarea:focus, select:focus { border-color: var(--teal); }
+
+        textarea {
+            resize: vertical;
+            min-height: 90px;
+            line-height: 1.5;
+        }
+
+        select option { background: var(--bg-surface); }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--teal);
+            color: #062925;
+            border: none;
+            border-radius: 9px;
+            font-family: var(--font);
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 0.4rem;
+            transition: opacity 0.15s, transform 0.1s;
+            letter-spacing: 0.2px;
+        }
+
+        .btn:hover { opacity: 0.9; }
+        .btn:active { transform: scale(0.99); }
+        .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin: 1.75rem 0;
+        }
+
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .step-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: var(--teal);
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        .step-text {
+            font-size: 0.8rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            margin-bottom: 1.2rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6rem;
+        }
+
+        .alert-error {
+            background: rgba(248,113,113,0.1);
+            border: 1px solid rgba(248,113,113,0.3);
+            color: var(--risk-high);
+        }
+
+        .alert-success {
+            background: rgba(45,212,191,0.08);
+            border: 1px solid var(--teal-border);
+            color: var(--teal);
+        }
+
+        .success-state { display: none; text-align: center; padding: 1rem 0; }
+        .success-state svg { stroke: var(--teal); margin-bottom: 1rem; }
+        .success-state h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+        .success-state p { font-size: 0.84rem; color: var(--muted); line-height: 1.55; }
+    </style>
+</head>
+<body>
+    <div class="card">
+
+        <div class="brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24">
+                    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                </svg>
+            </div>
+            <span class="brand-name">Threat Intelligence Platform</span>
+            <span class="brand-badge">Restricted</span>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-error">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <div id="form-state">
+            <h1>Request Access</h1>
+            <p class="subtitle">This platform is access-controlled. Submit your details and the owner will review your request manually.</p>
+
+            <div id="form-error" class="alert alert-error" style="display:none"></div>
+
+            <form id="reg-form" onsubmit="submitForm(event)">
+                <div class="field">
+                    <label for="name">Full Name</label>
+                    <input id="name" type="text" placeholder="Jane Smith" required maxlength="100">
+                </div>
+                <div class="field">
+                    <label for="role">Your Role</label>
+                    <select id="role" required>
+                        <option value="" disabled selected>Select your role</option>
+                        <option>Recruiter / HR</option>
+                        <option>Security Engineer</option>
+                        <option>SOC Analyst</option>
+                        <option>Penetration Tester</option>
+                        <option>Student</option>
+                        <option>Researcher</option>
+                        <option>Developer</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="email">Email Address</label>
+                    <input id="email" type="email" placeholder="jane@company.com" required maxlength="200">
+                </div>
+                <div class="field">
+                    <label for="desc">Why do you want access? <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                    <textarea id="desc" placeholder="Brief description of your interest or use case..." maxlength="500"></textarea>
+                </div>
+                <button class="btn" type="submit" id="submit-btn">Request Access</button>
+            </form>
+
+            <div class="divider"></div>
+
+            <div class="steps">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <div class="step-text">Submit your details — takes under a minute.</div>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <div class="step-text">The platform owner reviews your request manually.</div>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <div class="step-text">You receive an email with a one-time access link.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="success-state" id="success-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                <polyline points="9 12 11 14 15 10"/>
+            </svg>
+            <h2>Request Submitted</h2>
+            <p>Your request has been received. You will get an email at <strong id="confirm-email"></strong> once it is approved — usually within a few hours.</p>
+        </div>
+
+    </div>
+
+    <script>
+        async function submitForm(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submit-btn');
+            const errBox = document.getElementById('form-error');
+            errBox.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+
+            const payload = {
+                name: document.getElementById('name').value.trim(),
+                role: document.getElementById('role').value,
+                email: document.getElementById('email').value.trim(),
+                description: document.getElementById('desc').value.trim(),
+            };
+
+            try {
+                const res = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    errBox.textContent = data.error || 'Something went wrong. Please try again.';
+                    errBox.style.display = 'flex';
+                    btn.disabled = false;
+                    btn.textContent = 'Request Access';
+                    return;
+                }
+                document.getElementById('confirm-email').textContent = payload.email;
+                document.getElementById('form-state').style.display = 'none';
+                document.getElementById('success-state').style.display = 'block';
+            } catch {
+                errBox.textContent = 'Network error. Please check your connection and try again.';
+                errBox.style.display = 'flex';
+                btn.disabled = false;
+                btn.textContent = 'Request Access';
+            }
+        }
+    </script>
+</body>
+</html>

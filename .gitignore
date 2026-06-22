@@ -1,0 +1,39 @@
+# Secrets
+.env
+backend/credentials/token.json
+backend/credentials/credentials.json
+
+# Editor / assistant local config
+.claude/
+CLAUDE.md
+.mcp.json
+*.local.json
+
+# Database
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

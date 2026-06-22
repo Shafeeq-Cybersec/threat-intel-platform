@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel — Threat Intelligence Platform</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232DD4BF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/></svg>">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0B1120;
+            --bg-surface: #131B2E;
+            --bg-elevated: #1A2540;
+            --border: #23304D;
+            --teal: #2DD4BF;
+            --teal-dim: rgba(45,212,191,0.08);
+            --teal-border: rgba(45,212,191,0.25);
+            --text: #E6EDF3;
+            --muted: #64748B;
+            --risk-high: #F87171;
+            --risk-med: #FBBF24;
+            --risk-low: #34D399;
+            --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            background: var(--bg-primary);
+            font-family: var(--font);
+            color: var(--text);
+            padding: 2rem 1.5rem;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: radial-gradient(circle, rgba(45,212,191,0.04) 1px, transparent 1px);
+            background-size: 32px 32px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .page { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .header-icon {
+            width: 40px; height: 40px;
+            background: var(--teal-dim);
+            border: 1px solid var(--teal-border);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .header-icon svg {
+            width: 20px; height: 20px;
+            stroke: var(--teal); fill: none;
+            stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+        }
+
+        h1 { font-size: 1.3rem; font-weight: 800; }
+        .header-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.9rem;
+            margin-bottom: 1.8rem;
+        }
+
+        .stat-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+        }
+
+        .stat-label {
+            font-size: 0.62rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--muted);
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            font-family: 'Courier New', monospace;
+            line-height: 1;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .filter-btn {
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--muted);
+            font-family: var(--font);
+            transition: all 0.15s;
+        }
+
+        .filter-btn.active, .filter-btn:hover {
+            background: var(--teal-dim);
+            border-color: var(--teal-border);
+            color: var(--teal);
+        }
+
+        .request-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.2rem 1.4rem;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.15s;
+        }
+
+        .request-card.pending { border-left: 3px solid var(--risk-med); }
+        .request-card.approved { border-left: 3px solid var(--teal); }
+        .request-card.rejected { border-left: 3px solid var(--risk-high); }
+        .request-card.used { border-left: 3px solid var(--muted); }
+
+        .card-top {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 0.85rem;
+        }
+
+        .avatar {
+            width: 38px; height: 38px;
+            border-radius: 50%;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.9rem; font-weight: 700;
+            color: var(--teal);
+            flex-shrink: 0;
+            text-transform: uppercase;
+        }
+
+        .card-info { flex: 1; min-width: 0; }
+
+        .card-name {
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+
+        .card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .tag {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 0.18rem 0.55rem;
+            border-radius: 5px;
+            background: var(--bg-elevated);
+            color: var(--muted);
+        }
+
+        .tag.status-pending  { background: rgba(251,191,36,0.1);  color: var(--risk-med);  border: 1px solid rgba(251,191,36,0.25); }
+        .tag.status-approved { background: var(--teal-dim);        color: var(--teal);      border: 1px solid var(--teal-border); }
+        .tag.status-rejected { background: rgba(248,113,113,0.1);  color: var(--risk-high); border: 1px solid rgba(248,113,113,0.25); }
+        .tag.status-used     { background: var(--bg-elevated);     color: var(--muted);     border: 1px solid var(--border); }
+
+        .card-time { margin-left: auto; font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+
+        .card-email {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-bottom: 0.6rem;
+        }
+
+        .card-desc {
+            font-size: 0.82rem;
+            color: var(--text);
+            line-height: 1.5;
+            padding: 0.6rem 0.8rem;
+            background: var(--bg-elevated);
+            border-radius: 7px;
+            margin-bottom: 0.85rem;
+            border: 1px solid var(--border);
+        }
+
+        .card-actions { display: flex; gap: 0.6rem; }
+
+        .btn-approve {
+            padding: 0.45rem 1.1rem;
+            background: var(--teal);
+            color: #062925;
+            border: none;
+            border-radius: 7px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: opacity 0.15s;
+        }
+
+        .btn-approve:hover { opacity: 0.85; }
+        .btn-approve:disabled { opacity: 0.4; cursor: default; }
+
+        .btn-reject {
+            padding: 0.45rem 1.1rem;
+            background: transparent;
+            color: var(--risk-high);
+            border: 1px solid rgba(248,113,113,0.3);
+            border-radius: 7px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: var(--font);
+            transition: background 0.15s;
+        }
+
+        .btn-reject:hover { background: rgba(248,113,113,0.08); }
+        .btn-reject:disabled { opacity: 0.4; cursor: default; }
+
+        .empty {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            padding: 0.7rem 1.2rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            font-size: 0.84rem;
+            color: var(--text);
+            z-index: 999;
+            display: none;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+
+        .toast.show { display: block; animation: slideUp 0.2s ease; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div class="page">
+
+        <div class="header">
+            <div class="header-icon">
+                <svg viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+            </div>
+            <div>
+                <h1>Admin Panel</h1>
+                <div class="header-sub">Threat Intelligence Platform — Access Management</div>
+            </div>
+        </div>
+
+        {% set pending  = requests | selectattr('status', 'equalto', 'pending')  | list %}
+        {% set approved = requests | selectattr('status', 'equalto', 'approved') | list %}
+        {% set used     = requests | selectattr('status', 'equalto', 'used')     | list %}
+        {% set rejected = requests | selectattr('status', 'equalto', 'rejected') | list %}
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Pending</div>
+                <div class="stat-value" style="color:var(--risk-med)">{{ pending | length }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Approved</div>
+                <div class="stat-value" style="color:var(--teal)">{{ approved | length }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Used</div>
+                <div class="stat-value" style="color:var(--muted)">{{ used | length }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Rejected</div>
+                <div class="stat-value" style="color:var(--risk-high)">{{ rejected | length }}</div>
+            </div>
+        </div>
+
+        <div class="filter-row">
+            <button class="filter-btn active" onclick="filter('all', this)">All ({{ requests | length }})</button>
+            <button class="filter-btn" onclick="filter('pending', this)">Pending ({{ pending | length }})</button>
+            <button class="filter-btn" onclick="filter('approved', this)">Approved</button>
+            <button class="filter-btn" onclick="filter('used', this)">Used</button>
+            <button class="filter-btn" onclick="filter('rejected', this)">Rejected</button>
+        </div>
+
+        <div id="cards">
+            {% if not requests %}
+            <div class="empty">No access requests yet.</div>
+            {% endif %}
+
+            {% for r in requests %}
+            <div class="request-card {{ r.status }}" data-status="{{ r.status }}" id="card-{{ r._id }}">
+                <div class="card-top">
+                    <div class="avatar">{{ r.name[0] if r.name else '?' }}</div>
+                    <div class="card-info">
+                        <div class="card-name">{{ r.name }}</div>
+                        <div class="card-meta">
+                            <span class="tag">{{ r.role }}</span>
+                            <span class="tag status-{{ r.status }}">{{ r.status }}</span>
+                        </div>
+                    </div>
+                    <div class="card-time">{{ r.created_at }}</div>
+                </div>
+
+                <div class="card-email">{{ r.email }}</div>
+
+                {% if r.description %}
+                <div class="card-desc">{{ r.description }}</div>
+                {% endif %}
+
+                {% if r.status == 'pending' %}
+                <div class="card-actions">
+                    <button class="btn-approve" onclick="approve('{{ r._id }}', this)">Approve & Send Email</button>
+                    <button class="btn-reject"  onclick="reject('{{ r._id }}', this)">Reject</button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        function filter(status, btn) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.querySelectorAll('.request-card').forEach(card => {
+                card.style.display = (status === 'all' || card.dataset.status === status) ? '' : 'none';
+            });
+        }
+
+        function showToast(msg, ok = true) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.borderColor = ok ? 'rgba(45,212,191,0.4)' : 'rgba(248,113,113,0.4)';
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 3000);
+        }
+
+        async function approve(id, btn) {
+            btn.disabled = true;
+            btn.textContent = 'Approving...';
+            const res = await fetch(`/api/admin/approve/${id}`, { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                const card = document.getElementById('card-' + id);
+                card.classList.remove('pending');
+                card.classList.add('approved');
+                card.dataset.status = 'approved';
+                card.querySelector('.card-actions').innerHTML = '<span style="font-size:0.8rem;color:var(--teal)">Approved — email sent</span>';
+                card.querySelectorAll('.tag.status-pending').forEach(t => {
+                    t.className = 'tag status-approved'; t.textContent = 'approved';
+                });
+                showToast('Approved and email sent.');
+            } else {
+                btn.disabled = false;
+                btn.textContent = 'Approve & Send Email';
+                showToast('Failed: ' + (data.error || 'unknown error'), false);
+            }
+        }
+
+        async function reject(id, btn) {
+            if (!confirm('Reject this request?')) return;
+            btn.disabled = true;
+            const res = await fetch(`/api/admin/reject/${id}`, { method: 'POST' });
+            const data = await res.json();
+            if (data.ok) {
+                const card = document.getElementById('card-' + id);
+                card.classList.remove('pending');
+                card.classList.add('rejected');
+                card.dataset.status = 'rejected';
+                card.querySelector('.card-actions').innerHTML = '<span style="font-size:0.8rem;color:var(--risk-high)">Rejected</span>';
+                card.querySelectorAll('.tag.status-pending').forEach(t => {
+                    t.className = 'tag status-rejected'; t.textContent = 'rejected';
+                });
+                showToast('Request rejected.');
+            } else {
+                btn.disabled = false;
+                showToast('Failed: ' + (data.error || 'unknown error'), false);
+            }
+        }
+    </script>
+</body>
+</html>

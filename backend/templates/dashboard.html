@@ -1,0 +1,1777 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Threat Detection System</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232DD4BF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/></svg>">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" async></script>
+    <style>
+        :root {
+            --bg-primary:#0B1120;
+            --bg-surface:#131B2E;
+            --bg-elevated:#1C2740;
+            --border-hairline:#23304D;
+            --accent-teal:#2DD4BF;
+            --text-primary:#E6EDF3;
+            --text-secondary:#94A3B8;
+            /* risk colors: reserved for actual risk results only */
+            --risk-low:#34D399;
+            --risk-med:#FBBF24;
+            --risk-high:#F87171;
+            --font-ui:'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            --font-mono:ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        }
+        * { box-sizing:border-box; }
+        body { margin:0; min-height:100vh; display:flex; background:var(--bg-primary);
+               color:var(--text-primary); font-family:var(--font-ui); font-size:14px; }
+        .mono { font-family:var(--font-mono); }
+
+        /* Dot grid background */
+        body::before {
+            content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+            background-image:radial-gradient(circle, rgba(45,212,191,0.055) 1px, transparent 1px);
+            background-size:32px 32px;
+        }
+        .sidebar,.main { position:relative; z-index:1; }
+
+        /* Sidebar */
+        .sidebar { width:220px; flex-shrink:0; display:flex; flex-direction:column; height:100vh; position:sticky; top:0;
+                   background:linear-gradient(180deg,#0D1422 0%,var(--bg-surface) 100%);
+                   border-right:1px solid var(--border-hairline); padding:1.5rem 0; }
+        .sidebar .brand { font-weight:700; font-size:0.95rem; padding:0 1.5rem 1.4rem;
+                          color:var(--text-primary); letter-spacing:0.2px;
+                          border-bottom:1px solid var(--border-hairline); margin-bottom:0.5rem; }
+        .nav-item { display:flex; align-items:center; gap:0.6rem; padding:0.65rem 1.5rem;
+                    color:var(--text-secondary); cursor:pointer; font-size:0.9rem;
+                    border-left:2px solid transparent;
+                    transition:background 0.15s ease, color 0.15s ease; }
+        .nav-item:hover:not(.active) { background:rgba(45,212,191,0.06); color:var(--text-primary); }
+        .ic { width:17px; height:17px; flex-shrink:0; fill:none; stroke:currentColor;
+              stroke-width:2; stroke-linecap:round; stroke-linejoin:round; opacity:0.9; }
+        .nav-item.active { color:var(--text-primary); background:var(--bg-elevated);
+                           border-left-color:var(--accent-teal); }
+        .nav-item.disabled { opacity:0.4; cursor:default; }
+        .nav-item.disabled .tag { margin-left:auto; font-size:0.6rem; text-transform:uppercase;
+                                  letter-spacing:0.5px; color:var(--text-secondary); }
+
+        /* Main */
+        .main { flex:1; padding:2rem 2.5rem; min-width:0; }
+
+        /* Live feed column (visible on every tab) */
+        .feed { width:300px; flex-shrink:0; background:var(--bg-surface);
+                border-left:1px solid var(--border-hairline); padding:1.5rem 1.1rem;
+                height:100vh; position:sticky; top:0; overflow-y:auto; }
+        .feed h3 { font-size:0.8rem; text-transform:uppercase; letter-spacing:0.7px;
+                   color:var(--text-secondary); font-weight:600; margin:0 0 1rem; display:flex; align-items:center; gap:0.5rem; }
+        .feed .pulse { width:8px; height:8px; border-radius:50%; background:var(--risk-low); display:inline-block; animation:pulse 1.6s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        @keyframes tlFadeIn { from{opacity:0;transform:translateX(-6px)} to{opacity:1;transform:translateX(0)} }
+        .feed-item { border-left:3px solid var(--text-secondary); padding:0.5rem 0.7rem; margin-bottom:0.6rem;
+                     background:var(--bg-elevated); border-radius:0 6px 6px 0; }
+        .feed-item .fi-top { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; }
+        .feed-item .fi-kind { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); }
+        .feed-item .fi-score { font-family:var(--font-mono); font-weight:700; font-size:0.85rem; }
+        .feed-item .fi-title { font-size:0.74rem; color:var(--text-primary); margin-top:0.2rem; word-break:break-all;
+                               overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .feed-item .fi-time { font-size:0.62rem; color:var(--text-secondary); margin-top:0.2rem; }
+        .feed-empty { color:var(--text-secondary); font-size:0.78rem; }
+
+        /* Settings */
+        .svc-row { display:flex; align-items:flex-start; gap:0.7rem; padding:0.7rem 0; border-bottom:1px solid var(--border-hairline); }
+        .svc-dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; margin-top:0.2rem; }
+        .svc-name { font-weight:600; font-size:0.9rem; }
+        .svc-desc { color:var(--text-secondary); font-size:0.78rem; margin-top:0.1rem; }
+        .svc-state { margin-left:auto; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+        .export-btn { background:var(--bg-elevated); color:var(--text-primary); border:1px solid var(--border-hairline);
+                      padding:0.5rem 0.9rem; border-radius:6px; font-family:var(--font-ui); font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; margin:0.3rem 0.4rem 0 0; }
+        h1 { font-family:var(--font-ui); font-weight:700; font-size:1.5rem; margin:0 0 0.4rem; }
+        .subline { display:flex; align-items:center; gap:0.75rem; color:var(--text-secondary);
+                   font-size:0.8rem; margin-bottom:1.75rem; }
+        .build-badge { font-family:var(--font-ui); font-size:0.65rem; text-transform:uppercase;
+                       letter-spacing:0.6px; font-weight:600; padding:0.2rem 0.55rem;
+                       border-radius:5px; background:var(--bg-elevated); color:var(--text-secondary); }
+
+        .panel { background:var(--bg-surface); border:1px solid var(--border-hairline);
+                 border-radius:14px; padding:1.5rem; }
+        .panel h2 { font-size:0.95rem; font-weight:600; margin:0 0 1rem; }
+
+        input[type=text] { width:100%; padding:0.7rem 0.85rem; background:var(--bg-primary);
+            border:1px solid var(--border-hairline); border-radius:7px; color:var(--text-primary);
+            font-family:var(--font-mono); font-size:0.9rem; }
+        input[type=text]::placeholder { color:var(--text-secondary); opacity:0.6; }
+        input[type=text]:focus { outline:none; border-color:var(--accent-teal); }
+
+        .row { display:flex; gap:1rem; align-items:center; margin-top:0.85rem; }
+        button.primary { background:var(--accent-teal); color:#062925; border:none;
+            padding:0.6rem 1.3rem; border-radius:7px; font-family:var(--font-ui); font-weight:600;
+            font-size:0.9rem; cursor:pointer; }
+        button.primary:disabled { opacity:0.5; cursor:default; }
+        label.chk { font-size:0.82rem; color:var(--text-secondary); display:flex; align-items:center; gap:0.35rem; cursor:pointer; }
+
+        /* Result */
+        .result { display:none; margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid var(--border-hairline); }
+        .result-head { display:flex; align-items:center; gap:1rem; }
+        .score { font-family:var(--font-mono); font-size:2.6rem; font-weight:700; line-height:1; }
+        .score-cap { color:var(--text-secondary); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; }
+        .risk-pill { font-family:var(--font-ui); font-size:0.68rem; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.7px; padding:0.28rem 0.7rem; border-radius:999px; }
+        .threat-label { margin-left:auto; font-size:0.9rem; color:var(--text-primary); }
+        .sources { margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.4rem; }
+        .chip { font-family:var(--font-mono); font-size:0.72rem; background:var(--bg-elevated);
+                border:1px solid var(--border-hairline); padding:0.2rem 0.6rem; border-radius:999px;
+                color:var(--text-secondary); }
+        .meta { color:var(--text-secondary); font-size:0.78rem; margin-top:0.9rem; }
+
+        /* Pulse */
+        .pulse { width:8px; height:8px; border-radius:50%; background:var(--risk-low);
+                 display:inline-block; flex-shrink:0; animation:pulse 1.6s infinite; }
+
+        /* Dashboard header */
+        .dash-title {
+            font-size:1.7rem; font-weight:800; letter-spacing:-0.5px; margin:0 0 0.25rem;
+            background:linear-gradient(100deg,#E6EDF3 20%,#2DD4BF 100%);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+        }
+        .dash-subtitle { color:var(--text-secondary); font-size:0.8rem; margin:0; }
+        .live-badge {
+            display:flex; align-items:center; gap:0.5rem;
+            background:rgba(52,211,153,0.08); border:1px solid rgba(52,211,153,0.22);
+            border-radius:20px; padding:0.42rem 1.1rem;
+            font-size:0.7rem; font-weight:700; letter-spacing:0.7px; color:var(--risk-low);
+        }
+
+        /* KPI cards */
+        .kpi-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-bottom:1.2rem; }
+        .kpi-card {
+            border-radius:14px; padding:1.3rem 1.4rem; border:1px solid var(--border-hairline);
+            position:relative; overflow:hidden;
+            transition:transform 0.18s ease, box-shadow 0.18s ease;
+            cursor:default;
+        }
+        .kpi-card:hover { transform:translateY(-3px); box-shadow:0 16px 36px rgba(0,0,0,0.4); }
+        .kpi-card.kpi-teal   { background:linear-gradient(140deg,var(--bg-surface) 50%,rgba(45,212,191,0.13)); }
+        .kpi-card.kpi-red    { background:linear-gradient(140deg,var(--bg-surface) 50%,rgba(248,113,113,0.13)); }
+        .kpi-card.kpi-yellow { background:linear-gradient(140deg,var(--bg-surface) 50%,rgba(251,191,36,0.11)); }
+        .kpi-card.kpi-green  { background:linear-gradient(140deg,var(--bg-surface) 50%,rgba(52,211,153,0.11)); }
+        .kpi-card.kpi-purple { background:linear-gradient(140deg,var(--bg-surface) 50%,rgba(129,140,248,0.12)); }
+        .kpi-bg-icon {
+            position:absolute; right:1rem; top:50%; transform:translateY(-50%);
+            width:52px; height:52px; opacity:0.07; fill:none;
+            stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round;
+        }
+        .kpi-label { font-size:0.67rem; text-transform:uppercase; letter-spacing:0.65px;
+                     color:var(--text-secondary); font-weight:600; margin-bottom:0.55rem; }
+        .kpi-value { font-family:var(--font-mono); font-size:2.1rem; font-weight:800; line-height:1; }
+        .kpi-sub   { font-size:0.66rem; color:var(--text-secondary); margin-top:0.4rem; }
+
+        /* Dashboard mid row */
+        .dash-mid { display:grid; grid-template-columns:290px 1fr; gap:1.1rem; }
+        .panel-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.1rem; }
+        .panel-title  { display:flex; align-items:center; gap:0.45rem; font-size:0.72rem;
+                        font-weight:700; text-transform:uppercase; letter-spacing:0.6px;
+                        color:var(--text-secondary); }
+        .dash-timeline-panel { overflow-y:auto; max-height:500px; }
+        .dash-timeline-panel::-webkit-scrollbar { width:3px; }
+        .dash-timeline-panel::-webkit-scrollbar-track { background:transparent; }
+        .dash-timeline-panel::-webkit-scrollbar-thumb { background:var(--border-hairline); border-radius:4px; }
+
+        /* Donut chart */
+        .donut-wrap  { position:relative; display:flex; justify-content:center; margin-bottom:0.85rem; }
+        .donut-center { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                        text-align:center; pointer-events:none; }
+        .donut-center-val   { font-family:var(--font-mono); font-size:1.6rem; font-weight:800;
+                              color:var(--text-primary); line-height:1; }
+        .donut-center-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.5px;
+                              color:var(--text-secondary); margin-top:0.25rem; }
+        .donut-legend { display:flex; justify-content:center; gap:1.2rem; margin-bottom:1.1rem; }
+        .legend-item  { display:flex; align-items:center; gap:0.4rem;
+                        font-size:0.72rem; color:var(--text-secondary); }
+        .legend-dot   { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+        /* Dist bars */
+        .dist-row   { display:flex; align-items:center; gap:0.65rem; margin-bottom:0.55rem; }
+        .dist-label { font-size:0.67rem; color:var(--text-secondary); width:60px; flex-shrink:0; }
+        .dist-track { flex:1; height:5px; background:rgba(11,17,32,0.8); border-radius:999px; overflow:hidden; }
+        .dist-fill  { height:100%; border-radius:999px; transition:width 0.7s cubic-bezier(.4,0,.2,1); min-width:3px; }
+        .dist-count { font-size:0.67rem; font-family:var(--font-mono); color:var(--text-secondary);
+                      width:26px; text-align:right; }
+
+        /* Timeline */
+        .timeline { position:relative; padding-left:1.5rem; }
+        .timeline::before {
+            content:''; position:absolute; left:4px; top:10px; bottom:10px; width:1px;
+            background:linear-gradient(to bottom,transparent,var(--border-hairline) 12%,
+                        var(--border-hairline) 88%,transparent);
+        }
+        .tl-item { position:relative; padding:0.65rem 0;
+                   border-bottom:1px solid rgba(35,48,77,0.55); }
+        .tl-item:last-child { border-bottom:none; }
+        .tl-dot  { position:absolute; left:-1.18rem; top:0.9rem;
+                   width:9px; height:9px; border-radius:50%; }
+        .tl-body { min-width:0; }
+        .tl-top  { display:flex; align-items:center; justify-content:space-between;
+                   gap:0.5rem; margin-bottom:0.12rem; }
+        .tl-kind { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.55px;
+                   font-weight:700; color:var(--text-secondary); }
+        .tl-score-pill { font-family:var(--font-mono); font-size:0.67rem; font-weight:700;
+                         padding:0.1rem 0.45rem; border-radius:5px; background:var(--bg-primary); }
+        .tl-title { font-size:0.79rem; color:var(--text-primary); white-space:nowrap;
+                    overflow:hidden; text-overflow:ellipsis; }
+        .tl-meta  { font-size:0.64rem; color:var(--text-secondary); margin-top:0.1rem; }
+        .feed-empty { color:var(--text-secondary); font-size:0.78rem; }
+
+        /* Scan progress animation (URL check) */
+        .scan-progress { padding:0.25rem 0; }
+        .scan-progress-title { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.65px;
+            font-weight:700; color:var(--text-secondary); margin:0 0 0.9rem; }
+        .scan-step { display:flex; align-items:center; gap:0.75rem; padding:0.55rem 0;
+            border-bottom:1px solid rgba(35,48,77,0.55); opacity:0.35;
+            transition:opacity 0.25s ease; }
+        .scan-step:last-child { border-bottom:none; }
+        .scan-step.scan-active { opacity:1; }
+        .scan-step.scan-done   { opacity:0.7; }
+        .scan-dot  { width:9px; height:9px; border-radius:50%; background:var(--border-hairline); flex-shrink:0; }
+        .scan-lbl  { flex:1; font-size:0.84rem; color:var(--text-primary); }
+        .scan-status { font-size:0.7rem; font-family:var(--font-mono); color:var(--text-secondary); }
+
+        /* URL verdict card */
+        .url-verdict { display:flex; gap:1.5rem; align-items:flex-start; }
+        .url-score-col { text-align:center; flex-shrink:0; min-width:90px; }
+        .url-detail-col { flex:1; min-width:0; }
+        .url-field { margin-bottom:0.7rem; }
+        .url-field:last-child { margin-bottom:0; }
+        .url-field-lbl { display:block; font-size:0.65rem; text-transform:uppercase;
+            letter-spacing:0.55px; color:var(--text-secondary); font-weight:600; margin-bottom:0.2rem; }
+        .url-field-val { font-size:0.88rem; color:var(--text-primary); }
+
+        /* Contributing factors */
+        .factors-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:0.6rem; }
+        .factors-hdr-title { font-size:0.7rem; font-weight:700; text-transform:uppercase;
+            letter-spacing:0.6px; color:var(--text-secondary); }
+        .factors-hdr-total { font-size:0.72rem; font-family:var(--font-mono); color:var(--text-secondary); }
+        .factor-row { display:flex; align-items:center; justify-content:space-between;
+            padding:0.38rem 0; border-bottom:1px solid rgba(35,48,77,0.5); }
+        .factor-row:last-child { border-bottom:none; }
+        .factor-lbl { font-size:0.8rem; color:var(--text-secondary); }
+        .factor-pts { font-family:var(--font-mono); font-size:0.8rem; font-weight:700; }
+
+        /* SOC event cards */
+        .soc-card { background:var(--bg-elevated); border:1px solid var(--border-hairline);
+            border-radius:10px; padding:1rem 1.1rem; margin-bottom:0.75rem; }
+        .soc-card:last-child { margin-bottom:0; }
+        .soc-card-hdr { display:flex; align-items:center; gap:0.7rem; margin-bottom:0.8rem; }
+        .soc-category { flex:1; font-size:0.88rem; font-weight:600; color:var(--text-primary); }
+        .soc-by { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.5px; font-weight:600;
+            padding:0.14rem 0.5rem; border-radius:4px; background:var(--bg-primary); color:var(--text-secondary); }
+        .soc-field { display:grid; grid-template-columns:110px 1fr; gap:0.4rem;
+            padding:0.3rem 0; border-bottom:1px solid rgba(35,48,77,0.4); align-items:start; }
+        .soc-field:last-child { border-bottom:none; }
+        .soc-fl { font-size:0.65rem; text-transform:uppercase; letter-spacing:0.5px;
+            color:var(--text-secondary); font-weight:600; padding-top:0.05rem; }
+        .soc-fv { font-size:0.8rem; color:var(--text-primary); }
+        .soc-log { font-family:var(--font-mono); font-size:0.73rem; color:var(--text-secondary);
+            background:var(--bg-primary); padding:0.35rem 0.6rem; border-radius:5px;
+            display:block; overflow-x:auto; white-space:nowrap; }
+        .soc-log::-webkit-scrollbar { height:3px; }
+        .soc-log::-webkit-scrollbar-thumb { background:var(--border-hairline); border-radius:4px; }
+
+        /* View subtitle + sample/try links */
+        .view-sub { color:var(--text-secondary); font-size:0.86rem; margin:-0.35rem 0 1.1rem;
+            max-width:680px; line-height:1.5; }
+        .try-link { display:inline-flex; align-items:center; gap:0.3rem; font-size:0.74rem;
+            color:var(--accent-teal); background:rgba(45,212,191,0.08);
+            border:1px solid rgba(45,212,191,0.25); border-radius:6px; padding:0.28rem 0.6rem;
+            cursor:pointer; transition:all 0.15s; user-select:none; }
+        .try-link:hover { background:rgba(45,212,191,0.16); }
+        .try-row { display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center; margin-top:0.6rem; }
+        .try-row .try-lbl { font-size:0.72rem; color:var(--text-secondary); margin-right:0.1rem; }
+
+        /* Recent scan history panel */
+        .recent-panel { margin-top:1.1rem; }
+        .recent-panel-title { font-size:0.65rem; text-transform:uppercase; letter-spacing:0.6px;
+            font-weight:700; color:var(--text-secondary); margin:0 0 0.65rem; }
+        .recent-item { display:grid; grid-template-columns:10px 1fr 44px 70px 50px;
+            gap:0.6rem; align-items:center; padding:0.45rem 0;
+            border-bottom:1px solid rgba(35,48,77,0.45); }
+        .recent-item:last-child { border-bottom:none; }
+        .ri-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+        .ri-title { font-size:0.78rem; color:var(--text-primary); white-space:nowrap;
+            overflow:hidden; text-overflow:ellipsis; min-width:0; }
+        .ri-score { font-family:var(--font-mono); font-size:0.76rem; font-weight:700;
+            text-align:right; }
+        .ri-label { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.4px;
+            text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .ri-time { font-size:0.62rem; color:var(--text-secondary); text-align:right; white-space:nowrap; }
+
+        /* SOC textarea custom scrollbar */
+        #logText::-webkit-scrollbar { width:5px; }
+        #logText::-webkit-scrollbar-track { background:transparent; }
+        #logText::-webkit-scrollbar-thumb { background:var(--border-hairline); border-radius:4px; }
+        #logText::-webkit-scrollbar-thumb:hover { background:var(--accent-teal); }
+        /* Email body textarea custom scrollbar */
+        #emailBody::-webkit-scrollbar { width:4px; }
+        #emailBody::-webkit-scrollbar-track { background:transparent; }
+        #emailBody::-webkit-scrollbar-thumb { background:var(--border-hairline); border-radius:4px; }
+        #emailBody::-webkit-scrollbar-thumb:hover { background:var(--accent-teal); }
+    </style>
+</head>
+<body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+        <symbol id="i-dashboard" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+        <symbol id="i-qr" viewBox="0 0 24 24"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 8h1"/><path d="M21 12v.01"/></symbol>
+        <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+    </defs></svg>
+
+    <aside class="sidebar">
+        <div class="brand"><svg class="ic" style="stroke:var(--accent-teal);width:18px;height:18px;vertical-align:-3px"><use href="#i-shield"/></svg> Threat Intel</div>
+        <div class="nav-item active" id="nav-dashboard" onclick="showView('dashboard')"><svg class="ic"><use href="#i-dashboard"/></svg> Dashboard</div>
+        <div class="nav-item" id="nav-url" onclick="showView('url')"><svg class="ic"><use href="#i-link"/></svg> URL Check</div>
+        <div class="nav-item" id="nav-ip" onclick="showView('ip')"><svg class="ic"><use href="#i-globe"/></svg> IP / Domain</div>
+        <div class="nav-item" id="nav-file" onclick="showView('file')"><svg class="ic"><use href="#i-file"/></svg> File Scan</div>
+        <div class="nav-item" id="nav-map" onclick="showView('map')"><svg class="ic"><use href="#i-globe"/></svg> Threat Map</div>
+        <div class="nav-item" id="nav-soc" onclick="showView('soc')"><svg class="ic"><use href="#i-chart"/></svg> SOC Analyzer</div>
+        <div class="nav-item" id="nav-qr" onclick="showView('qr')"><svg class="ic"><use href="#i-qr"/></svg> QR Scan</div>
+        <div class="nav-item" id="nav-email" onclick="showView('email')"><svg class="ic"><use href="#i-mail"/></svg> Email Scanner</div>
+        <div class="nav-item" id="nav-settings" onclick="showView('settings')"><svg class="ic"><use href="#i-settings"/></svg> Settings</div>
+    </aside>
+
+    <main class="main">
+      <section id="view-dashboard">
+
+        <!-- Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.6rem">
+          <div>
+            <h1 class="dash-title">Security Operations Center</h1>
+            <p class="dash-subtitle">Live threat intelligence &nbsp;·&nbsp; updates in real time</p>
+          </div>
+          <div class="live-badge">
+            <span class="pulse" style="width:7px;height:7px"></span>
+            LIVE
+          </div>
+        </div>
+
+        <!-- KPI grid 3×2 -->
+        <div class="kpi-grid">
+          <div class="kpi-card kpi-teal">
+            <svg class="kpi-bg-icon" style="color:var(--accent-teal)"><use href="#i-shield"/></svg>
+            <div class="kpi-label">Total Detections</div>
+            <div class="kpi-value" id="kpi-total" style="color:var(--accent-teal)">—</div>
+            <div class="kpi-sub">all scans combined</div>
+          </div>
+          <div class="kpi-card kpi-red">
+            <svg class="kpi-bg-icon" style="color:var(--risk-high)"><use href="#i-shield"/></svg>
+            <div class="kpi-label">High Risk</div>
+            <div class="kpi-value" id="kpi-high" style="color:var(--risk-high)">—</div>
+            <div class="kpi-sub">score ≥ 70</div>
+          </div>
+          <div class="kpi-card kpi-yellow">
+            <svg class="kpi-bg-icon" style="color:var(--risk-med)"><use href="#i-chart"/></svg>
+            <div class="kpi-label">Medium Risk</div>
+            <div class="kpi-value" id="kpi-med" style="color:var(--risk-med)">—</div>
+            <div class="kpi-sub">score 40 – 69</div>
+          </div>
+          <div class="kpi-card kpi-green">
+            <svg class="kpi-bg-icon" style="color:var(--risk-low)"><use href="#i-link"/></svg>
+            <div class="kpi-label">Low / Safe</div>
+            <div class="kpi-value" id="kpi-low" style="color:var(--risk-low)">—</div>
+            <div class="kpi-sub">score &lt; 40</div>
+          </div>
+          <div class="kpi-card kpi-purple">
+            <svg class="kpi-bg-icon" style="color:#818CF8"><use href="#i-mail"/></svg>
+            <div class="kpi-label">Emails Scanned</div>
+            <div class="kpi-value" id="kpi-emails" style="color:#818CF8">—</div>
+            <div class="kpi-sub">inbox analyzed</div>
+          </div>
+          <div class="kpi-card kpi-teal">
+            <svg class="kpi-bg-icon" style="color:var(--accent-teal)"><use href="#i-settings"/></svg>
+            <div class="kpi-label">Active Sources</div>
+            <div class="kpi-value" id="kpi-sources" style="color:var(--accent-teal)">—</div>
+            <div class="kpi-sub" id="kpi-sources-sub">of 7 configured</div>
+          </div>
+        </div>
+
+        <!-- Mid row: chart + timeline -->
+        <div class="dash-mid">
+
+          <!-- Left: donut + breakdown -->
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">Risk Distribution</span>
+            </div>
+            <div class="donut-wrap">
+              <canvas id="riskDonut" width="200" height="200"></canvas>
+              <div class="donut-center">
+                <div class="donut-center-val" id="donut-total">0</div>
+                <div class="donut-center-label">total</div>
+              </div>
+            </div>
+            <div class="donut-legend">
+              <div class="legend-item"><span class="legend-dot" style="background:var(--risk-high)"></span>High<b id="leg-high" style="font-family:var(--font-mono);font-size:0.78rem;color:var(--risk-high);margin-left:0.3rem">—</b></div>
+              <div class="legend-item"><span class="legend-dot" style="background:var(--risk-med)"></span>Med<b id="leg-med" style="font-family:var(--font-mono);font-size:0.78rem;color:var(--risk-med);margin-left:0.3rem">—</b></div>
+              <div class="legend-item"><span class="legend-dot" style="background:var(--risk-low)"></span>Low<b id="leg-low" style="font-family:var(--font-mono);font-size:0.78rem;color:var(--risk-low);margin-left:0.3rem">—</b></div>
+            </div>
+            <div style="border-top:1px solid var(--border-hairline);padding-top:1rem">
+              <div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary);font-weight:700;margin-bottom:0.75rem">Scan breakdown</div>
+              <div id="dist-bars"></div>
+            </div>
+          </div>
+
+          <!-- Right: live activity timeline -->
+          <div class="panel dash-timeline-panel">
+            <div class="panel-header">
+              <span class="panel-title">
+                <span class="pulse" style="width:7px;height:7px"></span>
+                Live Activity
+              </span>
+              <span style="font-size:0.68rem;color:var(--text-secondary);font-family:var(--font-mono)" id="feed-count"></span>
+            </div>
+            <div id="feedList" class="timeline"></div>
+            <div id="feed-empty" style="padding:3rem 0;text-align:center">
+              <svg style="width:38px;height:38px;fill:none;stroke:var(--accent-teal);stroke-width:1.5;opacity:0.18;display:block;margin:0 auto 0.9rem;stroke-linecap:round;stroke-linejoin:round"><use href="#i-shield"/></svg>
+              <div style="font-size:0.82rem;font-weight:500;color:var(--text-secondary)">No activity yet</div>
+              <div style="font-size:0.72rem;color:var(--text-secondary);opacity:0.55;margin-top:0.3rem">Run a scan to see live results here</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Detections over time -->
+        <div class="panel" style="margin-top:1.1rem">
+          <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between">
+            <span class="panel-title">Detections Over Time</span>
+            <div style="display:flex;gap:0;border:1px solid var(--border-hairline);border-radius:7px;overflow:hidden" id="histRange">
+              <button class="hist-range-btn hist-active" data-days="7"  onclick="setHistRange(this,7)"  style="padding:0.3rem 0.7rem;background:var(--accent-teal);border:none;color:#0B1120;font-family:var(--font-mono);font-size:0.72rem;font-weight:700;cursor:pointer">7d</button>
+              <button class="hist-range-btn" data-days="14" onclick="setHistRange(this,14)" style="padding:0.3rem 0.7rem;background:transparent;border:none;border-left:1px solid var(--border-hairline);color:var(--text-secondary);font-family:var(--font-mono);font-size:0.72rem;cursor:pointer">14d</button>
+              <button class="hist-range-btn" data-days="30" onclick="setHistRange(this,30)" style="padding:0.3rem 0.7rem;background:transparent;border:none;border-left:1px solid var(--border-hairline);color:var(--text-secondary);font-family:var(--font-mono);font-size:0.72rem;cursor:pointer">30d</button>
+            </div>
+          </div>
+          <div style="position:relative;margin-top:0.75rem">
+            <canvas id="histChart" height="220" style="width:100%;display:block"></canvas>
+            <div id="hist-empty" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;color:var(--text-secondary)">
+              <svg style="width:34px;height:34px;fill:none;stroke:var(--accent-teal);stroke-width:1.5;opacity:0.2;margin-bottom:0.6rem"><use href="#i-shield"/></svg>
+              <div style="font-size:0.8rem">No detections in this period</div>
+            </div>
+          </div>
+          <div class="donut-legend" style="justify-content:center;margin-top:0.85rem;gap:1.4rem">
+            <div class="legend-item"><span class="legend-dot" style="background:var(--risk-high)"></span>High</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--risk-med)"></span>Medium</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--risk-low)"></span>Low</div>
+          </div>
+        </div>
+
+      </section>
+
+      <section id="view-url" style="display:none">
+        <h1>URL Threat Check</h1>
+        <p class="view-sub">Check any link against VirusTotal, Google Safe Browsing, domain-age (RDAP), and Gemini AI to get a single risk score with the reasoning behind it.</p>
+
+        <div class="panel">
+            <h2>Analyze a URL</h2>
+            <input type="text" id="url" placeholder="https://example.com/suspicious-link" />
+            <div class="row">
+                <button class="primary" id="go" onclick="checkUrl()">Check URL</button>
+                <label class="chk"><input type="checkbox" id="force"> force refresh (skip cache)</label>
+            </div>
+            <div class="try-row">
+                <span class="try-lbl">Try:</span>
+                <span class="try-link" onclick="trySample('url','http://secure-paypa1-login.tk/verify-account')">Phishing example</span>
+                <span class="try-link" onclick="trySample('url','https://github.com')">Safe site</span>
+            </div>
+
+            <!-- Result populated dynamically by checkUrl() -->
+            <div class="result" id="result"></div>
+        </div>
+
+        <div class="panel" style="margin-top:1.1rem">
+            <h2>Bulk scan</h2>
+            <p class="meta" style="margin-top:0">Paste up to 20 URLs (one per line or comma-separated) to scan them all at once.</p>
+            <textarea id="bulkUrls" placeholder="https://example.com&#10;suspicious-site.tk&#10;another-link.com" style="width:100%;min-height:110px;padding:0.7rem 0.85rem;background:var(--bg-primary);border:1px solid var(--border-hairline);border-radius:7px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.82rem;box-sizing:border-box;resize:vertical"></textarea>
+            <div class="row">
+                <button class="primary" id="bulkGo" onclick="scanBulkUrls()">Scan all</button>
+                <span class="try-link" onclick="loadBulkSample()">Load sample URLs</span>
+            </div>
+            <div id="bulkResult" style="display:none;margin-top:1.2rem"></div>
+        </div>
+
+        <div class="panel" style="margin-top:1.1rem">
+            <p class="recent-panel-title">Recent URL &amp; QR Scans</p>
+            <div id="recent-url"><div style="color:var(--text-secondary);font-size:0.78rem;padding:0.4rem 0">No scans yet. Run your first check above.</div></div>
+        </div>
+      </section>
+
+      <section id="view-ip" style="display:none">
+        <h1>IP / Domain Reputation</h1>
+        <p class="view-sub">Investigate an IP or domain the way a SOC analyst would: abuse history, hosting provider, domain age, and an explained verdict that tells you why, not just a colour.</p>
+        <div class="panel">
+            <h2>Look up an IP address or domain</h2>
+            <input type="text" id="ipInput" placeholder="8.8.8.8  or  example.com" />
+            <div class="row">
+                <button class="primary" id="ipGo" onclick="lookupIp()">Look up</button>
+                <span class="meta" style="margin:0">Powered by AbuseIPDB (IPs) and RDAP (domains)</span>
+            </div>
+            <div class="try-row">
+                <span class="try-lbl">Try:</span>
+                <span class="try-link" onclick="trySample('ip','1.1.1.1')">1.1.1.1 (Cloudflare)</span>
+                <span class="try-link" onclick="trySample('ip','185.220.101.45')">Known-bad IP</span>
+                <span class="try-link" onclick="trySample('ip','github.com')">github.com</span>
+            </div>
+            <div id="ipResult" class="result"></div>
+        </div>
+      </section>
+
+      <section id="view-file" style="display:none">
+        <h1>File Hash Scanner</h1>
+        <p class="view-sub">Check a file against 70+ antivirus engines through VirusTotal. The file is hashed locally with SHA-256, so only the fingerprint leaves your machine, never the file itself.</p>
+        <div class="panel">
+            <h2>Scan a file or hash against 70+ antivirus engines</h2>
+            <p class="meta" style="margin-top:0">Files are hashed locally with SHA-256. Only the hash is sent to VirusTotal, never the file contents.</p>
+            <div id="fileDrop" style="border:1.5px dashed var(--border-hairline);border-radius:8px;padding:1.8rem;text-align:center;color:var(--text-secondary);cursor:pointer">
+                <svg class="ic" style="width:36px;height:36px;opacity:0.5"><use href="#i-file"/></svg>
+                <div style="margin-top:0.5rem">Drag &amp; drop a file here, or click to choose</div>
+                <div class="meta" id="fileName" style="margin-top:0.4rem"></div>
+                <input type="file" id="fileInput" style="display:none">
+            </div>
+            <div class="row" style="align-items:center;gap:0.6rem">
+                <span style="font-size:0.78rem;color:var(--text-secondary)">or paste a hash</span>
+                <input type="text" id="hashInput" placeholder="MD5, SHA-1, or SHA-256" style="flex:1;min-width:200px;font-family:var(--font-mono);font-size:0.8rem" />
+            </div>
+            <div class="row" style="align-items:center;gap:0.6rem">
+                <button class="primary" id="fileGo" onclick="scanFile()">Scan</button>
+                <span class="try-link" onclick="trySample('hash','275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f')">Try EICAR test malware</span>
+            </div>
+            <div id="fileResult" class="result"></div>
+        </div>
+      </section>
+
+      <section id="view-map" style="display:none">
+        <h1>Threat Origin Map</h1>
+        <p class="view-sub">See where your attacks are coming from. Attacker IPs from your SOC logs and URL scans are geolocated and plotted, sized by activity and coloured by severity.</p>
+        <div class="dash-mid" style="grid-template-columns:1fr 260px">
+          <div class="panel" style="padding:0">
+            <div id="threatMap" style="height:520px;width:100%;border-radius:14px;background:var(--bg-primary)"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">Top Origins</span></div>
+            <div style="display:flex;gap:0.5rem;margin:0.5rem 0 1rem">
+              <div style="flex:1;text-align:center;background:var(--bg-elevated);border-radius:8px;padding:0.6rem">
+                <div id="map-ips" style="font-family:var(--font-mono);font-size:1.3rem;font-weight:700;color:var(--accent-teal)">0</div>
+                <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-secondary)">Unique IPs</div>
+              </div>
+              <div style="flex:1;text-align:center;background:var(--bg-elevated);border-radius:8px;padding:0.6rem">
+                <div id="map-events" style="font-family:var(--font-mono);font-size:1.3rem;font-weight:700;color:var(--risk-high)">0</div>
+                <div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-secondary)">Events</div>
+              </div>
+            </div>
+            <div id="map-countries"></div>
+            <div id="map-empty" style="display:none;color:var(--text-secondary);font-size:0.8rem;padding:1rem 0;text-align:center">
+              No geolocatable attacker IPs yet. Run a SOC log scan with public IPs to populate the map.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-soc" style="display:none">
+        <h1>SOC Log Analyzer</h1>
+        <p class="view-sub">Paste raw security logs and get them triaged automatically: brute-force, off-hours access, malicious IPs, and impossible travel, each mapped to its MITRE ATT&amp;CK technique.</p>
+        <div class="panel">
+            <h2>Analyze security logs</h2>
+            <textarea id="logText" placeholder="Paste log lines here…" style="width:100%;min-height:140px;padding:0.7rem 0.85rem;background:var(--bg-primary);border:1px solid var(--border-hairline);border-radius:7px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.82rem;box-sizing:border-box;resize:vertical"></textarea>
+            <div class="row">
+                <button class="primary" id="socGo" onclick="analyzeLogs()">Analyze</button>
+                <span class="try-link" onclick="loadSocSample()">Load sample log</span>
+                <label class="chk" style="cursor:pointer"><svg class="ic" style="width:15px;height:15px;vertical-align:-3px"><use href="#i-upload"/></svg> upload file<input type="file" id="logFile" accept=".log,.txt" style="display:none" onchange="document.getElementById('logFileName').textContent=this.files[0]?this.files[0].name:''"></label>
+                <span class="meta" id="logFileName" style="margin:0"></span>
+            </div>
+
+            <div id="socResult" style="display:none;margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid var(--border-hairline)">
+                <div class="sources" id="socSummary"></div>
+                <div id="socBody" style="margin-top:1rem"></div>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top:1.1rem">
+            <p class="recent-panel-title">Recent SOC Events</p>
+            <div id="recent-soc"><div style="color:var(--text-secondary);font-size:0.78rem;padding:0.4rem 0">No events yet. Paste logs above to analyze.</div></div>
+        </div>
+      </section>
+
+      <section id="view-qr" style="display:none">
+        <h1>QR Code Scanner</h1>
+        <p class="view-sub">Decode a QR code image and run the hidden link through the full URL threat pipeline, catching "quishing" attacks where the malicious destination is concealed behind a QR.</p>
+        <div class="panel">
+            <h2>Scan a QR code for malicious links</h2>
+            <div id="qrDrop" style="border:1.5px dashed var(--border-hairline);border-radius:8px;padding:2rem;text-align:center;color:var(--text-secondary);cursor:pointer">
+                <svg class="ic" style="width:40px;height:40px;opacity:0.5"><use href="#i-qr"/></svg>
+                <div style="margin-top:0.5rem">Drag &amp; drop a QR image here, or click to choose</div>
+                <div class="meta" id="qrFileName" style="margin-top:0.4rem"></div>
+                <input type="file" id="qrFile" accept="image/*" style="display:none">
+            </div>
+            <div class="row" style="align-items:center;gap:0.6rem">
+                <button class="primary" id="qrGo" onclick="scanQr()">Scan QR</button>
+                <span class="try-link" onclick="trySampleQr()">Try sample QR</span>
+            </div>
+
+            <div id="qrResult" class="result"></div>
+        </div>
+
+        <div class="panel" style="margin-top:1.1rem">
+            <p class="recent-panel-title">Recent QR Scans</p>
+            <div id="recent-qr"><div style="color:var(--text-secondary);font-size:0.78rem;padding:0.4rem 0">No QR scans yet. Upload an image above.</div></div>
+        </div>
+      </section>
+
+      <section id="view-email" style="display:none">
+        <h1>Email Scanner</h1>
+        <p class="view-sub">Paste email content or upload a .eml file to scan for phishing using link reputation, sender-domain checks, urgency-language detection, and a Gemini verdict.</p>
+
+        <div class="panel">
+            <h2>Paste email</h2>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-bottom:0.8rem">
+                <div>
+                    <label class="field-label">From (sender)</label>
+                    <input id="emailFrom" type="text" placeholder="sender@example.com" style="width:100%;background:var(--bg-primary);border:1px solid var(--border-hairline);border-radius:8px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.85rem;padding:0.55rem 0.8rem;outline:none" onfocus="this.style.borderColor='var(--accent-teal)'" onblur="this.style.borderColor='var(--border-hairline)'">
+                </div>
+                <div>
+                    <label class="field-label">Subject</label>
+                    <input id="emailSubject" type="text" placeholder="Email subject line" style="width:100%;background:var(--bg-primary);border:1px solid var(--border-hairline);border-radius:8px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.85rem;padding:0.55rem 0.8rem;outline:none" onfocus="this.style.borderColor='var(--accent-teal)'" onblur="this.style.borderColor='var(--border-hairline)'">
+                </div>
+            </div>
+            <div style="margin-bottom:1rem">
+                <label class="field-label">Email body</label>
+                <textarea id="emailBody" rows="7" placeholder="Paste the email body here (plain text or HTML)..." style="width:100%;background:var(--bg-primary);border:1px solid var(--border-hairline);border-radius:8px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.82rem;padding:0.65rem 0.8rem;outline:none;resize:vertical;line-height:1.5" onfocus="this.style.borderColor='var(--accent-teal)'" onblur="this.style.borderColor='var(--border-hairline)'"></textarea>
+            </div>
+            <button class="primary" id="emailScanBtn" onclick="scanEmailPaste()">Analyze Email</button>
+            <button onclick="loadSampleEmail()" style="margin-left:0.6rem;padding:0.55rem 1.1rem;background:transparent;border:1px solid var(--border-hairline);border-radius:8px;color:var(--text-secondary);font-size:0.82rem;cursor:pointer;font-family:var(--font-sans);transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent-teal)';this.style.color='var(--accent-teal)'" onmouseout="this.style.borderColor='var(--border-hairline)';this.style.color='var(--text-secondary)'">Try sample phishing email</button>
+        </div>
+
+        <div class="panel" style="margin-top:1.1rem">
+            <h2>Upload .eml file</h2>
+            <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem">Drag and drop or select a .eml file exported from your email client.</p>
+            <div id="emlDrop" ondragover="event.preventDefault();this.style.borderColor='var(--accent-teal)'" ondragleave="this.style.borderColor='var(--border-hairline)'" ondrop="handleEmlDrop(event)" style="border:2px dashed var(--border-hairline);border-radius:10px;padding:2rem;text-align:center;cursor:pointer;transition:border-color 0.2s" onclick="document.getElementById('emlFile').click()">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-teal)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:0.6rem"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <div style="font-size:0.85rem;color:var(--text-secondary)" id="emlDropLabel">Click or drop a .eml file here</div>
+            </div>
+            <input type="file" id="emlFile" accept=".eml" style="display:none" onchange="scanEmlFile(this.files[0])">
+        </div>
+
+        <div id="emailResult" style="display:none;margin-top:1.1rem">
+            <div class="panel">
+                <p class="recent-panel-title">Scan Result</p>
+                <div id="emailResultBody"></div>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top:1.1rem">
+            <p class="recent-panel-title">Recent Email Scans</p>
+            <div id="recent-email"><div style="color:var(--text-secondary);font-size:0.78rem;padding:0.4rem 0">No scans yet.</div></div>
+        </div>
+      </section>
+
+      <section id="view-settings" style="display:none">
+        <h1>Settings</h1>
+        <div class="panel">
+            <h2>Service configuration</h2>
+            <p class="meta" style="margin-top:0">Green = key present &amp; active. Red = not configured (feature skips gracefully).</p>
+            <div id="svcList"></div>
+            <p class="meta" id="thresholdNote" style="margin-top:1rem"></p>
+        </div>
+        <div class="panel" style="margin-top:1.5rem">
+            <h2>Export data (CSV)</h2>
+            <a class="export-btn" href="/api/export/threat_logs.csv"><svg class="ic" style="width:14px;height:14px;vertical-align:-2px"><use href="#i-download"/></svg> threat_logs</a>
+            <a class="export-btn" href="/api/export/soc_events.csv"><svg class="ic" style="width:14px;height:14px;vertical-align:-2px"><use href="#i-download"/></svg> soc_events</a>
+            <a class="export-btn" href="/api/export/email_scans.csv"><svg class="ic" style="width:14px;height:14px;vertical-align:-2px"><use href="#i-download"/></svg> email_scans</a>
+        </div>
+        <div class="panel" style="margin-top:1.5rem">
+            <h2>PDF report</h2>
+            <p class="meta" style="margin-top:0">Download a formatted threat-intelligence summary of recent detections.</p>
+            <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap">
+                <span style="font-size:0.8rem;color:var(--text-secondary)">Period</span>
+                <select id="reportDays" onchange="document.getElementById('reportBtn').href='/api/report.pdf?days='+this.value" style="appearance:none;background:var(--bg-primary);border:1px solid var(--border-hairline);border-radius:7px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.82rem;padding:0.42rem 0.7rem;cursor:pointer;outline:none">
+                    <option value="7" selected>Last 7 days</option>
+                    <option value="14">Last 14 days</option>
+                    <option value="30">Last 30 days</option>
+                </select>
+                <a class="export-btn primary" id="reportBtn" href="/api/report.pdf?days=7" target="_blank" style="text-decoration:none">
+                    <svg class="ic" style="width:14px;height:14px;vertical-align:-2px"><use href="#i-download"/></svg> Generate PDF report
+                </a>
+            </div>
+        </div>
+      </section>
+    </main>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" async></script>
+<script>
+function riskBand(score) {
+    if (score >= 70) return { text:'HIGH',   color:'var(--risk-high)' };
+    if (score >= 40) return { text:'MEDIUM', color:'var(--risk-med)' };
+    return { text:'LOW', color:'var(--risk-low)' };
+}
+function rgbaFor(varName) {
+    // low-opacity background using the same hue as the pill text
+    const map = { 'var(--risk-high)':'rgba(248,113,113,0.14)',
+                  'var(--risk-med)':'rgba(251,191,36,0.14)',
+                  'var(--risk-low)':'rgba(52,211,153,0.14)' };
+    return map[varName];
+}
+const SCAN_STEPS = ['VirusTotal', 'Safe Browsing', 'RDAP', 'Gemini AI Analysis'];
+
+async function checkUrl() {
+    const urlVal = document.getElementById('url').value.trim();
+    if (!urlVal) return;
+    const btn = document.getElementById('go');
+    btn.disabled = true; btn.textContent = 'Scanning…';
+    const resultEl = document.getElementById('result');
+
+    // Show animated progress steps
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+        <div class="scan-progress">
+            <p class="scan-progress-title">Analyzing URL…</p>
+            ${SCAN_STEPS.map((s, i) => `
+                <div class="scan-step" id="ss${i}">
+                    <span class="scan-dot" id="sd${i}"></span>
+                    <span class="scan-lbl">${s}</span>
+                    <span class="scan-status" id="sst${i}">queued</span>
+                </div>`).join('')}
+        </div>`;
+
+    let si = 0;
+    const stepTick = setInterval(() => {
+        if (si > 0) {
+            const pd = document.getElementById('sd' + (si-1));
+            const ps = document.getElementById('sst' + (si-1));
+            const pp = document.getElementById('ss' + (si-1));
+            if (pd) { pd.style.background = 'var(--risk-low)'; pd.style.animation = 'none'; }
+            if (ps) { ps.textContent = 'done ✓'; ps.style.color = 'var(--risk-low)'; }
+            if (pp) pp.classList.replace('scan-active', 'scan-done');
+        }
+        if (si < SCAN_STEPS.length) {
+            const cd = document.getElementById('sd' + si);
+            const cs = document.getElementById('sst' + si);
+            const cp = document.getElementById('ss' + si);
+            if (cp) cp.classList.add('scan-active');
+            if (cd) { cd.style.background = 'var(--accent-teal)'; cd.style.animation = 'pulse 0.8s infinite'; }
+            if (cs) { cs.textContent = 'checking…'; cs.style.color = 'var(--accent-teal)'; }
+        }
+        si++;
+    }, 650);
+
+    try {
+        const res = await fetch('/check-url', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ url: urlVal, force_refresh: document.getElementById('force').checked })
+        });
+        const data = await res.json();
+        clearInterval(stepTick);
+        if (data.error) { resultEl.style.display = 'none'; alert(data.error); return; }
+
+        const band = riskBand(data.risk_score);
+        const factors = Array.isArray(data.factors) ? data.factors : [];
+        const lastUpdated = data.cached
+            ? 'from cache · ' + (data.timestamp ? new Date(data.timestamp + 'Z').toLocaleTimeString() : 'earlier')
+            : 'Just Now';
+
+        resultEl.innerHTML = `
+            <div class="url-verdict">
+                <div class="url-score-col">
+                    <div class="score" style="color:${band.color}">${data.risk_score}</div>
+                    <div class="score-cap">/ 100</div>
+                    <span class="risk-pill" style="color:${band.color};background:${rgbaFor(band.color)};display:inline-block;margin-top:0.55rem">${band.text}</span>
+                </div>
+                <div class="url-detail-col">
+                    <div class="url-field">
+                        <span class="url-field-lbl">Threat Type</span>
+                        <span class="url-field-val">${esc(data.threat || '—')}</span>
+                    </div>
+                    <div class="url-field">
+                        <span class="url-field-lbl">Sources Used</span>
+                        <div style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-top:0.2rem">
+                            ${(data.sources && data.sources.length ? data.sources : ['none configured'])
+                                .map(s => `<span class="chip">${esc(s)}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="url-field">
+                        <span class="url-field-lbl">Last Updated</span>
+                        <span class="url-field-val">${esc(lastUpdated)}</span>
+                    </div>
+                    ${data.reasoning ? `<div class="url-field">
+                        <span class="url-field-lbl">AI Reasoning</span>
+                        <span class="url-field-val" style="color:var(--text-secondary);font-size:0.8rem">${esc(data.reasoning)}</span>
+                    </div>` : ''}
+                </div>
+            </div>
+            ${factors.length ? `
+            <div style="margin-top:1.1rem;padding-top:1.1rem;border-top:1px solid var(--border-hairline)">
+                <div class="factors-hdr">
+                    <span class="factors-hdr-title">Contributing Factors</span>
+                    <span class="factors-hdr-total">Final Score = ${data.risk_score}</span>
+                </div>
+                ${factors.map(f => `
+                    <div class="factor-row">
+                        <span class="factor-lbl">${esc(f.label)}</span>
+                        <span class="factor-pts" style="color:var(--risk-high)">+${f.points}</span>
+                    </div>`).join('')}
+            </div>` : ''}`;
+        loadRecent('url', 'recent-url');
+    } catch (e) {
+        clearInterval(stepTick);
+        resultEl.style.display = 'none';
+        alert('Request failed: ' + e);
+    } finally {
+        btn.disabled = false; btn.textContent = 'Check URL';
+    }
+}
+document.getElementById('url').addEventListener('keydown', e => { if (e.key === 'Enter') checkUrl(); });
+document.getElementById('ipInput').addEventListener('keydown', e => { if (e.key === 'Enter') lookupIp(); });
+
+// "Try a sample" helpers (let a first-time user demo every feature instantly)
+function trySample(type, value) {
+    if (type === 'url')  { document.getElementById('url').value = value; checkUrl(); }
+    if (type === 'ip')   { document.getElementById('ipInput').value = value; lookupIp(); }
+    if (type === 'hash') {
+        _selectedFile = null;
+        const fn = document.getElementById('fileName'); if (fn) fn.textContent = '';
+        document.getElementById('hashInput').value = value; scanFile();
+    }
+}
+function loadBulkSample() {
+    document.getElementById('bulkUrls').value =
+        'https://github.com\n' +
+        'http://secure-paypa1-login.tk/verify-account\n' +
+        'https://www.wikipedia.org\n' +
+        'http://amaz0n-deals.net/claim-prize\n' +
+        'https://stackoverflow.com';
+}
+function loadSocSample() {
+    document.getElementById('logText').value = [
+        'Jun 22 02:14:01 srv sshd[2211]: Failed password for admin from 45.33.32.156 port 50122 ssh2',
+        'Jun 22 02:14:03 srv sshd[2212]: Failed password for admin from 45.33.32.156 port 50124 ssh2',
+        'Jun 22 02:14:05 srv sshd[2213]: Failed password for admin from 45.33.32.156 port 50126 ssh2',
+        'Jun 22 02:14:07 srv sshd[2214]: Failed password for admin from 45.33.32.156 port 50128 ssh2',
+        'Jun 22 02:14:09 srv sshd[2215]: Failed password for admin from 45.33.32.156 port 50130 ssh2',
+        'Jun 22 02:14:11 srv sshd[2216]: Failed password for admin from 45.33.32.156 port 50132 ssh2',
+        'Jun 22 03:02:55 srv sshd[3001]: Accepted password for root from 185.220.101.45 port 41122 ssh2',
+        'Jun 22 14:31:20 srv sudo: contractor : command not allowed ; TTY=pts/1 ; USER=root ; COMMAND=/bin/su'
+    ].join('\n');
+}
+
+// File / hash scanner
+const FILE_VERDICT = {
+    'Malicious':  { color:'#F87171', bg:'rgba(248,113,113,0.14)' },
+    'Suspicious': { color:'#FBBF24', bg:'rgba(251,191,36,0.14)' },
+    'Clean':      { color:'#34D399', bg:'rgba(52,211,153,0.14)' },
+    'Unknown':    { color:'#94A3B8', bg:'rgba(148,163,184,0.14)' },
+};
+let _selectedFile = null;
+(function initFileDrop(){
+    const drop = document.getElementById('fileDrop');
+    const input = document.getElementById('fileInput');
+    if (!drop || !input) return;
+    drop.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+        if (input.files[0]) { _selectedFile = input.files[0];
+            document.getElementById('fileName').textContent = _selectedFile.name + ' (' + fmtBytes(_selectedFile.size) + ')'; }
+    });
+    ['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = 'var(--accent-teal)'; }));
+    ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.style.borderColor = 'var(--border-hairline)'; }));
+    drop.addEventListener('drop', e => {
+        if (e.dataTransfer.files[0]) { _selectedFile = e.dataTransfer.files[0];
+            document.getElementById('fileName').textContent = _selectedFile.name + ' (' + fmtBytes(_selectedFile.size) + ')'; }
+    });
+})();
+
+function fmtBytes(n) {
+    if (n == null) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+    return (n/1048576).toFixed(1) + ' MB';
+}
+
+async function scanFile() {
+    const hash = document.getElementById('hashInput').value.trim();
+    const btn = document.getElementById('fileGo');
+    const el = document.getElementById('fileResult');
+    if (!_selectedFile && !hash) { alert('Choose a file or paste a hash.'); return; }
+    btn.disabled = true; btn.textContent = 'Scanning…';
+    el.style.display = 'block';
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:0.6rem;color:var(--text-secondary)">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--accent-teal);animation:pulse 0.9s infinite"></div>
+        ${_selectedFile ? 'Hashing file and querying VirusTotal…' : 'Querying VirusTotal…'}</div>`;
+    try {
+        let resp;
+        if (_selectedFile) {
+            const fd = new FormData();
+            fd.append('file', _selectedFile);
+            resp = await fetch('/api/file-scan', { method:'POST', body: fd });
+        } else {
+            resp = await fetch('/api/file-scan', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ hash })
+            });
+        }
+        const data = await resp.json();
+        if (data.error) { el.innerHTML = `<span style="color:var(--risk-med)">${esc(data.error)}</span>`; return; }
+
+        if (!data.found) {
+            el.innerHTML = `
+                <div class="url-verdict">
+                    <div class="url-score-col" style="min-width:140px">
+                        <svg style="width:32px;height:32px;fill:none;stroke:#94A3B8;stroke-width:1.5;margin-bottom:0.5rem"><use href="#i-file"/></svg>
+                        <span class="risk-pill" style="color:#94A3B8;background:rgba(148,163,184,0.14);display:inline-block">Not in database</span>
+                    </div>
+                    <div class="url-detail-col">
+                        ${ipField('Queried hash', data.query_hash)}
+                        <div style="font-size:0.82rem;color:var(--text-secondary);margin-top:0.5rem">VirusTotal has never analysed this file. A clean hash here is not a guarantee of safety, only that no engine has scanned it before.</div>
+                    </div>
+                </div>`;
+            return;
+        }
+
+        const v = FILE_VERDICT[data.verdict] || FILE_VERDICT['Unknown'];
+        const detList = (data.detections || []).slice(0, 12).map(d =>
+            `<div style="display:flex;justify-content:space-between;gap:0.6rem;padding:0.3rem 0;border-bottom:1px solid rgba(35,48,77,0.5)">
+                <span style="font-size:0.78rem;color:var(--text-secondary)">${esc(d.engine)}</span>
+                <span style="font-size:0.78rem;color:var(--risk-high);font-family:var(--font-mono)">${esc(d.result)}</span>
+            </div>`).join('');
+
+        el.innerHTML = `
+            <div class="url-verdict">
+                <div class="url-score-col" style="min-width:150px">
+                    <div class="score" style="color:${v.color}">${data.malicious}<span style="font-size:1rem;color:var(--text-secondary)">/${data.total_engines}</span></div>
+                    <div class="score-cap">engines flagged</div>
+                    <span class="risk-pill" style="color:${v.color};background:${v.bg};display:inline-block;margin-top:0.55rem">${esc(data.verdict)}</span>
+                </div>
+                <div class="url-detail-col">
+                    ${ipField('Threat label', data.threat_label)}
+                    ${ipField('File name', data.file_name)}
+                    ${ipField('Type', data.type_description)}
+                    ${ipField('Size', fmtBytes(data.size))}
+                    ${ipField('First seen', data.first_seen)}
+                    ${ipField('Last analysed', data.last_analyzed)}
+                    ${ipField('SHA-256', data.sha256)}
+                </div>
+            </div>
+            ${detList ? `<div style="margin-top:1.1rem;padding-top:1.1rem;border-top:1px solid var(--border-hairline)">
+                <div class="factors-hdr-title" style="margin-bottom:0.6rem">Engine detections (${data.malicious})</div>
+                ${detList}
+            </div>` : ''}`;
+    } catch (e) {
+        el.innerHTML = `<span style="color:var(--risk-high)">Scan failed: ${esc(String(e))}</span>`;
+    } finally {
+        btn.disabled = false; btn.textContent = 'Scan';
+    }
+}
+document.getElementById('hashInput').addEventListener('keydown', e => { if (e.key === 'Enter') scanFile(); });
+
+// Threat origin map (Leaflet)
+let _map = null, _mapLayer = null;
+async function loadThreatMap() {
+    if (typeof L === 'undefined') {   // Leaflet still loading from CDN
+        setTimeout(loadThreatMap, 300);
+        return;
+    }
+    if (!_map) {
+        _map = L.map('threatMap', { attributionControl:false, worldCopyJump:true }).setView([20, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 10, subdomains: 'abcd'
+        }).addTo(_map);
+        _mapLayer = L.layerGroup().addTo(_map);
+    }
+    // Leaflet needs a size recalculation when the container becomes visible
+    setTimeout(() => _map.invalidateSize(), 60);
+
+    try {
+        const data = await (await fetch('/api/geo-threats')).json();
+        _mapLayer.clearLayers();
+        document.getElementById('map-ips').textContent = data.total_ips || 0;
+        document.getElementById('map-events').textContent = data.total_events || 0;
+
+        const empty = document.getElementById('map-empty');
+        if (empty) empty.style.display = (data.points || []).length ? 'none' : 'block';
+
+        (data.points || []).forEach(p => {
+            const c = p.score >= 70 ? '#F87171' : p.score >= 40 ? '#FBBF24' : '#34D399';
+            const radius = Math.min(6 + p.count * 2, 20);
+            L.circleMarker([p.lat, p.lon], {
+                radius, color: c, weight: 1.5, fillColor: c, fillOpacity: 0.35
+            }).bindPopup(
+                `<b>${p.ip}</b><br>${(p.city ? p.city + ', ' : '')}${p.country || ''}<br>` +
+                `${p.label} &middot; score ${p.score} &middot; ${p.count} event(s)`
+            ).addTo(_mapLayer);
+        });
+
+        document.getElementById('map-countries').innerHTML = (data.top_countries || []).map(tc => {
+            const max = data.top_countries[0].count || 1;
+            return `<div class="dist-row">
+                <span class="dist-label" style="font-size:0.74rem">${esc(tc.country)}</span>
+                <div class="dist-track"><div class="dist-fill" style="width:${Math.round(tc.count/max*100)}%;background:var(--risk-high)"></div></div>
+                <span class="dist-count">${tc.count}</span>
+            </div>`;
+        }).join('');
+    } catch(e) {}
+}
+
+// Bulk URL scanning
+async function scanBulkUrls() {
+    const text = document.getElementById('bulkUrls').value.trim();
+    if (!text) return;
+    const btn = document.getElementById('bulkGo');
+    const el = document.getElementById('bulkResult');
+    btn.disabled = true; btn.textContent = 'Scanning…';
+    el.style.display = 'block';
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:0.6rem;color:var(--text-secondary);font-size:0.82rem">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--accent-teal);animation:pulse 0.9s infinite"></div>
+        Scanning URLs in parallel…</div>`;
+    try {
+        const data = await (await fetch('/check-url/bulk', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ urls: text })
+        })).json();
+        if (data.error) { el.innerHTML = `<span style="color:var(--risk-med)">${esc(data.error)}</span>`; return; }
+
+        const rows = data.results.map(r => {
+            const c = r.risk_score == null ? 'var(--text-secondary)' : emailScoreColor(r.risk_score);
+            const score = r.risk_score == null ? '—' : r.risk_score;
+            return `<tr style="border-top:1px solid var(--border-hairline)">
+                <td style="padding:0.5rem 0.6rem"><span class="risk-pill" style="color:${c};background:${rgbaFor(c)||'transparent'}">${score}</span></td>
+                <td style="padding:0.5rem 0.6rem;font-size:0.78rem">${esc(r.threat || '')}</td>
+                <td style="padding:0.5rem 0.6rem"><span class="mono" style="font-size:0.74rem;word-break:break-all;color:var(--text-secondary)">${esc(r.url)}</span></td>
+                <td style="padding:0.5rem 0.6rem;font-size:0.7rem;color:var(--text-secondary)">${r.cached ? 'cached' : 'fresh'}</td>
+            </tr>`;
+        }).join('');
+
+        el.innerHTML = `
+            <div class="sources" style="margin-bottom:0.8rem">
+                <span class="chip">${data.scanned} scanned</span>
+                <span class="chip" style="color:var(--risk-high)">${data.high_risk} high-risk</span>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+                <thead><tr style="text-align:left;color:var(--text-secondary)">
+                    <th style="padding:0.5rem 0.6rem">Score</th>
+                    <th style="padding:0.5rem 0.6rem">Threat</th>
+                    <th style="padding:0.5rem 0.6rem">URL</th>
+                    <th style="padding:0.5rem 0.6rem">Source</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+        loadRecent('url', 'recent-url');
+    } catch (e) {
+        el.innerHTML = `<span style="color:var(--risk-high)">Scan failed: ${esc(String(e))}</span>`;
+    } finally {
+        btn.disabled = false; btn.textContent = 'Scan all';
+    }
+}
+
+// Recent history panels
+function timeAgo(ts) {
+    if (!ts) return '';
+    const d = new Date(ts.endsWith('Z') ? ts : ts + 'Z');
+    const s = Math.floor((Date.now() - d) / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+}
+async function loadRecent(kind, containerId, limit) {
+    limit = limit || 8;
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    try {
+        const all = await (await fetch('/api/feed')).json();
+        const items = kind === 'url'
+            ? all.filter(it => it.kind === 'url' || it.kind === 'qr').slice(0, limit)
+            : all.filter(it => it.kind === kind).slice(0, limit);
+        if (!items.length) return;
+        el.innerHTML = items.map(it => {
+            const c = it.score >= 70 ? 'var(--risk-high)' : it.score >= 40 ? 'var(--risk-med)' : 'var(--risk-low)';
+            const kindBadge = it.kind === 'qr' ? '[QR] ' : it.kind === 'url' ? '[URL] ' : '';
+            return `<div class="recent-item">
+                <span class="ri-dot" style="background:${c};box-shadow:0 0 5px ${c}88"></span>
+                <span class="ri-title" title="${esc(it.title||'')}">${esc(kindBadge + (it.title||'—'))}</span>
+                <span class="ri-score" style="color:${c}">${it.score ?? '—'}</span>
+                <span class="ri-label" style="color:${c}">${esc(it.label||'')}</span>
+                <span class="ri-time">${timeAgo(it.timestamp)}</span>
+            </div>`;
+        }).join('');
+    } catch(e) {}
+}
+
+// view switching
+function showView(v) {
+    ['dashboard','url','ip','file','map','soc','qr','email','settings'].forEach(name => {
+        document.getElementById('view-' + name).style.display = name === v ? 'block' : 'none';
+        document.getElementById('nav-' + name).classList.toggle('active', name === v);
+    });
+    if (v === 'dashboard') loadStats();
+    if (v === 'map') loadThreatMap();
+    if (v === 'url')   loadRecent('url',   'recent-url');
+    if (v === 'soc')   loadRecent('soc',   'recent-soc');
+    if (v === 'qr')    loadRecent('qr',    'recent-qr');
+    if (v === 'email') { refreshEmailStatus(); loadRecent('email', 'recent-email'); }
+    if (v === 'settings') loadSettings();
+}
+
+// IP / Domain reputation lookup
+const IP_VERDICT = {
+    'Trusted Infrastructure': { color:'#38BDF8', bg:'rgba(56,189,248,0.14)' },
+    'Clean':                  { color:'#34D399', bg:'rgba(52,211,153,0.14)' },
+    'Low Risk':               { color:'#A3E635', bg:'rgba(163,230,53,0.14)' },
+    'Suspicious':             { color:'#FBBF24', bg:'rgba(251,191,36,0.14)' },
+    'High Risk':              { color:'#FB923C', bg:'rgba(251,146,60,0.14)' },
+    'Malicious':              { color:'#F87171', bg:'rgba(248,113,113,0.14)' },
+    'Unknown':                { color:'#94A3B8', bg:'rgba(148,163,184,0.14)' },
+};
+const FACTOR_ICON = { positive:'✓', caveat:'⚠', negative:'✕' };
+const FACTOR_COLOR = { positive:'var(--risk-low)', caveat:'var(--risk-med)', negative:'var(--risk-high)' };
+
+function ipField(label, value) {
+    if (value === null || value === undefined || value === '') return '';
+    return `<div class="url-field">
+        <span class="url-field-lbl">${label}</span>
+        <span class="url-field-val">${esc(String(value))}</span>
+    </div>`;
+}
+
+function renderFactors(factors) {
+    if (!factors || !factors.length) return '';
+    return `<div style="margin-top:1.1rem;padding-top:1.1rem;border-top:1px solid var(--border-hairline)">
+        <div class="factors-hdr-title" style="margin-bottom:0.6rem">Analysis</div>
+        ${factors.map(f => {
+            const c = FACTOR_COLOR[f.type] || 'var(--text-secondary)';
+            return `<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.3rem 0">
+                <span style="color:${c};font-weight:700;flex-shrink:0;width:14px">${FACTOR_ICON[f.type]||'·'}</span>
+                <span style="font-size:0.82rem;color:var(--text-primary)">${esc(f.text)}</span>
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+async function lookupIp() {
+    const val = document.getElementById('ipInput').value.trim();
+    if (!val) return;
+    const btn = document.getElementById('ipGo');
+    const el = document.getElementById('ipResult');
+    btn.disabled = true; btn.textContent = 'Looking up…';
+    el.style.display = 'block';
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:0.6rem;color:var(--text-secondary)">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--accent-teal);animation:pulse 0.9s infinite"></div>
+        Querying threat-intel sources…</div>`;
+    try {
+        const data = await (await fetch('/api/ip-lookup', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ value: val })
+        })).json();
+        if (data.error) { el.innerHTML = `<span style="color:var(--risk-med)">${esc(data.error)}</span>`; return; }
+
+        const v = IP_VERDICT[data.verdict] || IP_VERDICT['Unknown'];
+        const conf = data.confidence || { level:'-', percent:0 };
+
+        let detail = '';
+        if (data.type === 'ip') {
+            detail =
+                ipField('Abuse Confidence', (data.abuse_score ?? 0) + ' / 100') +
+                ipField('Organization', data.isp) +
+                ipField('Country', data.country) +
+                ipField('Hostname', data.domain) +
+                ipField('Usage Type', data.usage_type) +
+                ipField('Total Reports', data.total_reports) +
+                ipField('Last Reported', data.last_reported);
+        } else {
+            detail =
+                ipField('Registrar', data.registrar) +
+                ipField('Registered', data.registration_date) +
+                ipField('Domain Age', data.age_days != null ? data.age_days + ' days' : null) +
+                ipField('Resolved IP', data.resolved_ip) +
+                ipField('Host IP Abuse Score', data.ip_abuse_score != null ? data.ip_abuse_score + ' / 100' : null) +
+                ipField('Host Organization', data.ip_isp) +
+                ipField('Host Country', data.ip_country) +
+                (data.note ? ipField('Note', data.note) : '');
+        }
+
+        const infraBadge = data.is_infrastructure ? `
+            <div style="margin-top:0.9rem;padding:0.7rem 0.85rem;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.3);border-radius:8px">
+                <div style="font-size:0.74rem;font-weight:700;color:#38BDF8;margin-bottom:0.2rem">Infrastructure Provider Detected${data.provider ? ': ' + esc(data.provider) : ''}</div>
+                <div style="font-size:0.76rem;color:var(--text-secondary);line-height:1.5">This address belongs to a public cloud or CDN provider. Reports may come from customer activity and do not necessarily indicate malicious intent.</div>
+            </div>` : '';
+
+        el.innerHTML = `
+            <div class="url-verdict">
+                <div class="url-score-col" style="min-width:140px">
+                    <svg style="width:32px;height:32px;fill:none;stroke:${v.color};stroke-width:1.5;margin-bottom:0.5rem"><use href="#i-globe"/></svg>
+                    <span class="risk-pill" style="color:${v.color};background:${v.bg};display:inline-block;font-size:0.72rem">${esc(data.verdict)}</span>
+                    <div class="score-cap" style="margin-top:0.55rem;word-break:break-all">${esc(data.value)}</div>
+                    <div style="margin-top:0.85rem;text-align:left">
+                        <div style="display:flex;justify-content:space-between;font-size:0.64rem;text-transform:uppercase;letter-spacing:0.4px;color:var(--text-secondary);margin-bottom:0.25rem">
+                            <span>Confidence</span><span style="color:${v.color};font-weight:700">${esc(conf.level)} ${conf.percent}%</span>
+                        </div>
+                        <div style="background:var(--bg-primary);border-radius:4px;height:5px;overflow:hidden">
+                            <div style="background:${v.color};height:5px;width:${conf.percent}%;border-radius:4px;transition:width 0.4s ease"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="url-detail-col">
+                    ${detail || '<span style="color:var(--text-secondary)">No additional data available.</span>'}
+                    ${infraBadge}
+                </div>
+            </div>
+            ${renderFactors(data.factors)}`;
+    } catch (e) {
+        el.innerHTML = `<span style="color:var(--risk-high)">Lookup failed: ${esc(String(e))}</span>`;
+    } finally {
+        btn.disabled = false; btn.textContent = 'Look up';
+    }
+}
+
+// SOC log analysis
+const SEV_COLOR = { critical:'var(--risk-high)', high:'var(--risk-high)', medium:'var(--risk-med)', low:'var(--risk-low)' };
+const SEV_BG = { critical:'rgba(248,113,113,0.18)', high:'rgba(248,113,113,0.12)', medium:'rgba(251,191,36,0.12)', low:'rgba(52,211,153,0.12)' };
+function esc(s){ return (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function analyzeLogs() {
+    const btn = document.getElementById('socGo');
+    const file = document.getElementById('logFile').files[0];
+    const text = document.getElementById('logText').value.trim();
+    if (!file && !text) { alert('Paste logs or choose a file.'); return; }
+    btn.disabled = true; btn.textContent = 'Analyzing…';
+    try {
+        let res;
+        if (file) {
+            const fd = new FormData(); fd.append('file', file);
+            res = await fetch('/api/soc-analyzer', { method:'POST', body: fd });
+        } else {
+            res = await fetch('/api/soc-analyzer', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ log_text: text }) });
+        }
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+
+        const order = ['critical','high','medium','low'];
+        document.getElementById('socSummary').innerHTML =
+            `<span class="chip">${data.lines_analyzed} lines</span>` +
+            `<span class="chip">${data.flagged_count} flagged</span>` +
+            order.filter(s => data.severity_breakdown[s]).map(s =>
+                `<span class="chip" style="color:${SEV_COLOR[s]};background:${SEV_BG[s]}">${s}: ${data.severity_breakdown[s]}</span>`).join('');
+
+        const SEV_SCORE_MAP = { critical:90, high:75, medium:50, low:20 };
+        document.getElementById('socBody').innerHTML = data.events.map(e => {
+            const c   = SEV_COLOR[e.severity] || 'var(--text-secondary)';
+            const bg  = SEV_BG[e.severity]   || 'rgba(100,100,100,0.1)';
+            const sc  = SEV_SCORE_MAP[e.severity] || 0;
+            const log = e.raw_log_line || '';
+            const ip  = (log.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/) || [])[1];
+            const usr = (log.match(/for\s+(\w+)\s+from/i) || [])[1];
+            const fails = (log.match(/Failed login/gi) || []).length || null;
+            const outcome = /Successful\s+(login|auth)/i.test(log) ? 'Successful Authentication'
+                          : /Failed/i.test(log) ? 'Access Denied' : null;
+            const m = e.mitre;
+            const mitreHeader = m ? `<a href="${esc(m.url)}" target="_blank" title="${esc(m.name)} (${esc(m.tactic)})" style="text-decoration:none;font-family:var(--font-mono);font-size:0.62rem;font-weight:700;letter-spacing:0.3px;padding:0.14rem 0.5rem;border-radius:4px;background:rgba(56,189,248,0.12);color:#38BDF8;border:1px solid rgba(56,189,248,0.3)">${esc(m.id)}</a>` : '';
+            const mitreField = m ? `<div class="soc-field"><span class="soc-fl">MITRE ATT&amp;CK</span><span class="soc-fv"><a href="${esc(m.url)}" target="_blank" style="color:#38BDF8;text-decoration:none">${esc(m.id)} ${esc(m.name)}</a> <span style="color:var(--text-secondary)">&middot; ${esc(m.tactic)}</span></span></div>` : '';
+            return `<div class="soc-card">
+                <div class="soc-card-hdr">
+                    <span class="risk-pill" style="color:${c};background:${bg}">${e.severity.toUpperCase()}</span>
+                    <span class="soc-category">${esc(e.category || 'Security Event')}</span>
+                    ${mitreHeader}
+                    <span class="soc-by">${e.ai_assisted ? 'AI' : 'rule'}</span>
+                </div>
+                <div class="soc-field"><span class="soc-fl">Summary</span><span class="soc-fv">${esc(e.explanation || '')}</span></div>
+                ${mitreField}
+                ${ip  ? `<div class="soc-field"><span class="soc-fl">Source IP</span><span class="soc-fv" style="font-family:var(--font-mono)">${ip}</span></div>` : ''}
+                ${usr ? `<div class="soc-field"><span class="soc-fl">Target Account</span><span class="soc-fv" style="font-family:var(--font-mono)">${esc(usr)}</span></div>` : ''}
+                ${fails ? `<div class="soc-field"><span class="soc-fl">Failed Attempts</span><span class="soc-fv" style="font-family:var(--font-mono)">${fails}</span></div>` : ''}
+                ${outcome ? `<div class="soc-field"><span class="soc-fl">Outcome</span><span class="soc-fv">${outcome}</span></div>` : ''}
+                <div class="soc-field"><span class="soc-fl">Log Line</span><code class="soc-log">${esc(log)}</code></div>
+                <div class="soc-field"><span class="soc-fl">Risk Score</span><span class="soc-fv" style="font-family:var(--font-mono);font-weight:700;color:${c}">${sc}/100</span></div>
+            </div>`;
+        }).join('') || `<div style="padding:0.8rem 0;color:var(--text-secondary);font-size:0.82rem">No suspicious events found.</div>`;
+        document.getElementById('socResult').style.display = 'block';
+        loadRecent('soc', 'recent-soc');
+    } catch (e) {
+        alert('Request failed: ' + e);
+    } finally {
+        btn.disabled = false; btn.textContent = 'Analyze';
+    }
+}
+
+// QR scan
+const qrDrop = document.getElementById('qrDrop');
+const qrFileInput = document.getElementById('qrFile');
+qrDrop.addEventListener('click', () => qrFileInput.click());
+qrFileInput.addEventListener('change', () => { if (qrFileInput.files[0]) document.getElementById('qrFileName').textContent = qrFileInput.files[0].name; });
+['dragover','dragenter'].forEach(ev => qrDrop.addEventListener(ev, e => { e.preventDefault(); qrDrop.style.borderColor = 'var(--accent-teal)'; }));
+['dragleave','drop'].forEach(ev => qrDrop.addEventListener(ev, e => { e.preventDefault(); qrDrop.style.borderColor = 'var(--border-hairline)'; }));
+qrDrop.addEventListener('drop', e => {
+    if (e.dataTransfer.files[0]) { qrFileInput.files = e.dataTransfer.files; document.getElementById('qrFileName').textContent = e.dataTransfer.files[0].name; }
+});
+
+function renderQrResult(data) {
+    const el = document.getElementById('qrResult');
+    el.style.display = 'block';
+    if (data.error) {
+        el.innerHTML = `<span style="color:var(--risk-med)">${esc(data.error)}${data.decoded ? ' (decoded: ' + esc(data.decoded.join(', ')) + ')' : ''}</span>`;
+        return;
+    }
+    const band = riskBand(data.risk_score);
+    el.innerHTML = `
+        <div class="url-verdict">
+            <div class="url-score-col">
+                <div class="score" style="color:${band.color}">${data.risk_score}</div>
+                <div class="score-cap">/ 100</div>
+                <span class="risk-pill" style="color:${band.color};background:${rgbaFor(band.color)};display:inline-block;margin-top:0.55rem">${band.text}</span>
+            </div>
+            <div class="url-detail-col">
+                <div class="url-field">
+                    <span class="url-field-lbl">Decoded URL</span>
+                    <span class="url-field-val mono" style="word-break:break-all">${esc(data.decoded_url || '')}</span>
+                </div>
+                <div class="url-field">
+                    <span class="url-field-lbl">Threat Type</span>
+                    <span class="url-field-val">${esc(data.threat || '—')}</span>
+                </div>
+                <div class="url-field">
+                    <span class="url-field-lbl">Sources Used</span>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-top:0.2rem">
+                        ${(data.sources && data.sources.length ? data.sources : ['none configured'])
+                            .map(s => `<span class="chip">${esc(s)}</span>`).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    loadRecent('qr', 'recent-qr');
+}
+
+async function scanQr() {
+    const file = qrFileInput.files[0];
+    if (!file) { alert('Choose or drop a QR image first.'); return; }
+    const btn = document.getElementById('qrGo');
+    btn.disabled = true; btn.textContent = 'Scanning…';
+    try {
+        const fd = new FormData(); fd.append('qr_image', file);
+        const data = await (await fetch('/api/scan-qr', { method:'POST', body: fd })).json();
+        renderQrResult(data);
+    } catch (e) {
+        alert('Request failed: ' + e);
+    } finally {
+        btn.disabled = false; btn.textContent = 'Scan QR';
+    }
+}
+
+async function trySampleQr() {
+    const btn = document.getElementById('qrGo');
+    btn.disabled = true; btn.textContent = 'Scanning…';
+    document.getElementById('qrFileName').textContent = 'sample: malicious QR';
+    try {
+        const data = await (await fetch('/api/scan-qr', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ sample: true })
+        })).json();
+        renderQrResult(data);
+    } catch (e) {
+        alert('Request failed: ' + e);
+    } finally {
+        btn.disabled = false; btn.textContent = 'Scan QR';
+    }
+}
+
+// Email scanner
+function loadSampleEmail() {
+    document.getElementById('emailFrom').value = 'security-alert@paypa1-accounts.com';
+    document.getElementById('emailSubject').value = 'Urgent: Your PayPal account has been limited';
+    document.getElementById('emailBody').value = `Dear Customer,
+
+We have detected unusual activity on your PayPal account. Your account access has been temporarily limited.
+
+To restore full access, you must verify your identity within 24 hours or your account will be permanently suspended.
+
+Click here to verify now: http://paypa1-secure-login.tk/verify?token=8x92kLmN
+
+You will need to confirm:
+- Full name and date of birth
+- Credit card number and CVV
+- Online banking username and password
+
+Failure to act immediately will result in permanent account closure and loss of funds.
+
+PayPal Security Team
+© PayPal Inc. All rights reserved.`;
+    document.getElementById('emailFrom').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function emailScoreColor(s) { return s >= 70 ? 'var(--risk-high)' : s >= 40 ? 'var(--risk-med)' : 'var(--risk-low)'; }
+
+function _renderEmailResult(r) {
+    const c = emailScoreColor(r.phishing_score);
+    const urls = (r.flagged_urls || []).map(u =>
+        `<div style="color:${emailScoreColor(u.risk_score)};font-size:0.78rem;font-family:var(--font-mono);word-break:break-all;margin-bottom:0.25rem">${esc(u.url)} <span style="opacity:0.7">(${u.risk_score})</span></div>`
+    ).join('') || '<span style="color:var(--text-secondary)">None</span>';
+    const signals = (r.signals || []).map(s =>
+        `<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.2rem">• ${esc(s)}</div>`
+    ).join('') || '<span style="color:var(--text-secondary)">None</span>';
+
+    return `
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap">
+        <div style="font-size:2.5rem;font-weight:800;font-family:var(--font-mono);color:${c};line-height:1">${r.phishing_score}</div>
+        <div>
+            <div style="font-size:1rem;font-weight:700;color:${c}">${esc(r.label)}</div>
+            <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:0.15rem">Phishing Score</div>
+        </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+        <div><div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary);font-weight:700;margin-bottom:0.3rem">Sender</div>
+            <div style="font-size:0.82rem;font-family:var(--font-mono)">${esc(r.sender || '—')}</div></div>
+        <div><div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary);font-weight:700;margin-bottom:0.3rem">Subject</div>
+            <div style="font-size:0.82rem">${esc(r.subject || '—')}</div></div>
+    </div>
+    <div style="margin-bottom:1rem"><div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary);font-weight:700;margin-bottom:0.4rem">Flagged URLs</div>${urls}</div>
+    <div><div style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-secondary);font-weight:700;margin-bottom:0.4rem">Signals</div>${signals}</div>`;
+}
+
+async function _doEmailScan(fetchFn, btnId, btnBusy) {
+    const btn = document.getElementById(btnId);
+    btn.disabled = true; btn.textContent = btnBusy;
+    try {
+        const res  = await fetchFn();
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        const r = (data.results || [])[0];
+        if (!r) { alert('No result returned.'); return; }
+        const resultEl = document.getElementById('emailResult');
+        document.getElementById('emailResultBody').innerHTML = _renderEmailResult(r);
+        resultEl.style.display = 'block';
+        resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        loadRecent('email', 'recent-email');
+    } catch (e) { alert('Request failed: ' + e); }
+    finally { btn.disabled = false; btn.textContent = btn.dataset.label || 'Analyze Email'; }
+}
+
+async function scanEmailPaste() {
+    const sender  = document.getElementById('emailFrom').value.trim();
+    const subject = document.getElementById('emailSubject').value.trim();
+    const body    = document.getElementById('emailBody').value.trim();
+    if (!body && !subject) { alert('Please enter at least the email subject or body.'); return; }
+    await _doEmailScan(() => fetch('/email_scanner/api/scan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sender, subject, body }),
+    }), 'emailScanBtn', 'Analyzing…');
+}
+
+async function scanEmlFile(file) {
+    if (!file) return;
+    document.getElementById('emlDropLabel').textContent = file.name;
+    const fd = new FormData();
+    fd.append('file', file);
+    await _doEmailScan(() => fetch('/email_scanner/api/scan-eml', { method: 'POST', body: fd }),
+        'emailScanBtn', 'Analyzing…');
+}
+
+function handleEmlDrop(e) {
+    e.preventDefault();
+    document.getElementById('emlDrop').style.borderColor = 'var(--border-hairline)';
+    const file = e.dataTransfer.files[0];
+    if (file) scanEmlFile(file);
+}
+
+// Live feed (SocketIO)
+const KIND_LABEL = { url:'URL', qr:'QR', email:'EMAIL', soc:'SOC LOG', log:'LOG' };
+function feedColor(score) { score = score || 0; return score >= 70 ? 'var(--risk-high)' : score >= 40 ? 'var(--risk-med)' : 'var(--risk-low)'; }
+function timeAgo(ts) {
+    if (!ts) return '';
+    const d = new Date(ts.endsWith('Z') ? ts : ts + 'Z');
+    const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+    if (s < 60) return Math.floor(s) + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    return Math.floor(s/3600) + 'h ago';
+}
+function renderFeedItem(it) {
+    const c = feedColor(it.score);
+    const div = document.createElement('div');
+    div.className = 'tl-item';
+    div.style.animation = 'tlFadeIn 0.3s ease';
+    div.innerHTML =
+        `<div class="tl-dot" style="background:${c};box-shadow:0 0 8px ${c}88"></div>` +
+        `<div class="tl-body">` +
+          `<div class="tl-top">` +
+            `<span class="tl-kind">${KIND_LABEL[it.kind] || (it.kind||'').toUpperCase()}</span>` +
+            `<span class="tl-score-pill" style="color:${c}">${it.score != null ? it.score : '–'}</span>` +
+          `</div>` +
+          `<div class="tl-title">${esc(it.title || '')}</div>` +
+          `<div class="tl-meta">${esc(it.label || '')} &nbsp;·&nbsp; ${timeAgo(it.timestamp)}</div>` +
+        `</div>`;
+    return div;
+}
+function addFeedItem(it, prepend) {
+    const list = document.getElementById('feedList');
+    const emptyEl = document.getElementById('feed-empty');
+    if (emptyEl) emptyEl.style.display = 'none';
+    const node = renderFeedItem(it);
+    if (prepend) list.insertBefore(node, list.firstChild); else list.appendChild(node);
+    while (list.children.length > 40) list.removeChild(list.lastChild);
+    const countEl = document.getElementById('feed-count');
+    if (countEl) countEl.textContent = list.children.length + ' events';
+}
+async function loadFeed() {
+    try {
+        const items = await (await fetch('/api/feed')).json();
+        items.forEach(it => addFeedItem(it, false));
+    } catch (e) {}
+}
+// Open on the Dashboard by default and preload the feed.
+showView('dashboard');
+loadFeed();
+// Connect the live feed once socket.io has finished loading (async), without blocking the UI.
+// WebSocket-only avoids a long-poll request that keeps the browser tab "loading".
+let _socket = null;
+(function initSocket(attempt) {
+    if (typeof io === 'undefined') {
+        if ((attempt || 0) < 20) setTimeout(() => initSocket((attempt || 0) + 1), 300);
+        return;  // give up quietly if the CDN never loads, page still works, feed preloaded
+    }
+    try {
+        _socket = io({ transports: ['websocket'] });
+        _socket.on('threat_event', it => { addFeedItem(it, true); loadStats(); });
+
+    } catch (e) {}
+})();
+
+// Dashboard stats + animated donut
+function animCount(id, target) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const from = el.textContent === '—' ? 0 : (parseInt(el.textContent) || 0);
+    if (from === target) { el.textContent = target; return; }
+    const dur = 550, t0 = performance.now();
+    (function tick(now) {
+        const p = Math.min(1, (now - t0) / dur);
+        el.textContent = Math.round(from + (target - from) * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) requestAnimationFrame(tick);
+    })(performance.now());
+}
+
+async function loadStats() {
+    try {
+        const d = await (await fetch('/api/stats')).json();
+        animCount('kpi-total',  d.total);
+        animCount('kpi-high',   d.high);
+        animCount('kpi-med',    d.medium);
+        animCount('kpi-low',    d.low);
+        animCount('kpi-emails', d.emails);
+        document.getElementById('kpi-sources').textContent     = d.sources_active + '/' + d.sources_total;
+        document.getElementById('kpi-sources-sub').textContent = 'of ' + d.sources_total + ' configured';
+        document.getElementById('donut-total').textContent     = d.total;
+        const lh = document.getElementById('leg-high');
+        const lm = document.getElementById('leg-med');
+        const ll = document.getElementById('leg-low');
+        if (lh) lh.textContent = d.high;
+        if (lm) lm.textContent = d.medium;
+        if (ll) ll.textContent = d.low;
+        drawDonut(d.high, d.medium, d.low);
+        const maxV = Math.max(d.url_qr, d.emails, d.log_events, 1);
+        document.getElementById('dist-bars').innerHTML = [
+            { label:'URL / QR', val:d.url_qr,    color:'#38BDF8' },
+            { label:'Emails',   val:d.emails,     color:'#F472B6' },
+            { label:'SOC Logs', val:d.log_events, color:'#A78BFA' },
+        ].map(b =>
+            `<div class="dist-row">
+                <span class="dist-label">${b.label}</span>
+                <div class="dist-track"><div class="dist-fill" style="width:${Math.round(b.val/maxV*100)}%;background:${b.color}"></div></div>
+                <span class="dist-count">${b.val}</span>
+            </div>`).join('');
+        loadHistory(window._histDays || 7);
+    } catch(e) {}
+}
+
+// Detections-over-time chart (pure canvas, stacked bars by risk band)
+function setHistRange(btn, days) {
+    window._histDays = days;
+    document.querySelectorAll('.hist-range-btn').forEach(b => {
+        b.style.background = 'transparent';
+        b.style.color = 'var(--text-secondary)';
+        b.style.fontWeight = '';
+    });
+    btn.style.background = 'var(--accent-teal)';
+    btn.style.color = '#0B1120';
+    btn.style.fontWeight = '700';
+    loadHistory(days);
+}
+
+async function loadHistory(days) {
+    try {
+        const d = await (await fetch('/api/history?days=' + (days || 7))).json();
+        drawHistChart(d);
+    } catch(e) {}
+}
+
+function drawHistChart(data) {
+    const canvas = document.getElementById('histChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    const cssW = canvas.clientWidth || 700;
+    const cssH = 220;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = cssW * dpr;
+    canvas.height = cssH * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const days = data.days || [];
+    const grandTotal = (data.total || []).reduce((a, b) => a + b, 0);
+    const emptyEl = document.getElementById('hist-empty');
+    if (emptyEl) emptyEl.style.display = grandTotal === 0 ? 'flex' : 'none';
+    if (grandTotal === 0) return;
+
+    const padL = 34, padR = 12, padT = 14, padB = 26;
+    const plotW = cssW - padL - padR;
+    const plotH = cssH - padT - padB;
+    const n = days.length;
+
+    const maxVal = Math.max(...data.total, 1);
+    const niceMax = maxVal <= 5 ? 5 : Math.ceil(maxVal / 5) * 5;
+
+    const css = getComputedStyle(document.documentElement);
+    const cHigh = css.getPropertyValue('--risk-high').trim() || '#F87171';
+    const cMed  = css.getPropertyValue('--risk-med').trim()  || '#FBBF24';
+    const cLow  = css.getPropertyValue('--risk-low').trim()  || '#34D399';
+    const cGrid = css.getPropertyValue('--border-hairline').trim() || '#23304D';
+    const cText = css.getPropertyValue('--text-secondary').trim() || '#94A3B8';
+
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const steps = 4;
+    for (let i = 0; i <= steps; i++) {
+        const v = Math.round(niceMax / steps * i);
+        const y = padT + plotH - (v / niceMax) * plotH;
+        ctx.strokeStyle = cGrid;
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(cssW - padR, y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = cText;
+        ctx.fillText(v, padL - 6, y);
+    }
+
+    const slot = plotW / n;
+    const barW = Math.min(slot * 0.6, 26);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < n; i++) {
+        const x = padL + slot * i + (slot - barW) / 2;
+        let yBase = padT + plotH;
+        const segs = [
+            { v: data.low[i],    c: cLow },
+            { v: data.medium[i], c: cMed },
+            { v: data.high[i],   c: cHigh },
+        ];
+        for (const s of segs) {
+            if (!s.v) continue;
+            const h = (s.v / niceMax) * plotH;
+            ctx.fillStyle = s.c;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(x, yBase - h, barW, h, 2);
+            else ctx.rect(x, yBase - h, barW, h);
+            ctx.fill();
+            yBase -= h;
+        }
+        const show = n <= 10 || i % Math.ceil(n / 10) === 0 || i === n - 1;
+        if (show) {
+            ctx.fillStyle = cText;
+            const md = (days[i] || '').slice(5);
+            ctx.fillText(md, x + barW / 2, padT + plotH + 7);
+        }
+    }
+}
+
+function drawDonut(high, medium, low) {
+    const canvas = document.getElementById('riskDonut');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const cx = W/2, cy = H/2, r = W/2 - 20, inner = r * 0.56;
+    const total = high + medium + low;
+    ctx.clearRect(0, 0, W, H);
+
+    if (total === 0) {
+        // Empty state ring
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.arc(cx, cy, inner, Math.PI * 2, 0, true);
+        ctx.closePath();
+        ctx.fillStyle = '#1C2740';
+        ctx.fill();
+        return;
+    }
+
+    const segs = [
+        { val: high,   color: '#F87171', label: 'High'   },
+        { val: medium, color: '#FBBF24', label: 'Medium' },
+        { val: low,    color: '#34D399', label: 'Low'    },
+    ].filter(s => s.val > 0);
+
+    const gap = 0.03;
+    let angle = -Math.PI / 2;
+
+    segs.forEach(seg => {
+        const pct   = seg.val / total;
+        const sweep = pct * Math.PI * 2 - gap;
+        if (sweep <= 0) { angle += gap; return; }
+
+        // Segment fill
+        ctx.beginPath();
+        ctx.arc(cx, cy, r,     angle + gap / 2, angle + gap / 2 + sweep);
+        ctx.arc(cx, cy, inner, angle + gap / 2 + sweep, angle + gap / 2, true);
+        ctx.closePath();
+        ctx.fillStyle = seg.color;
+        ctx.fill();
+
+        // % label inside the ring band (only if segment ≥ 7%)
+        const pctInt = Math.round(pct * 100);
+        if (pctInt >= 7) {
+            const midA = angle + gap / 2 + sweep / 2;
+            const mr   = (r + inner) / 2;
+            ctx.save();
+            ctx.fillStyle = 'rgba(0,0,0,0.75)';
+            ctx.font = `bold 11px ui-monospace, monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(pctInt + '%', cx + Math.cos(midA) * mr, cy + Math.sin(midA) * mr);
+            ctx.restore();
+        }
+
+        angle += sweep + gap;
+    });
+
+    // Outer glow ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 2, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(45,212,191,0.08)';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+}
+
+// Settings
+async function loadSettings() {
+    const data = await (await fetch('/api/settings')).json();
+    document.getElementById('svcList').innerHTML = data.services.map(s => `
+        <div class="svc-row">
+            <span class="svc-dot" style="background:${s.configured ? 'var(--risk-low)' : 'var(--risk-high)'}"></span>
+            <div><div class="svc-name">${esc(s.name)}</div><div class="svc-desc">${esc(s.desc)}</div></div>
+            <span class="svc-state" style="color:${s.configured ? 'var(--risk-low)' : 'var(--risk-high)'}">${s.configured ? 'Active' : 'Not set'}</span>
+        </div>`).join('');
+    document.getElementById('thresholdNote').textContent = 'Alert threshold: ' + data.alert_threshold + ' (emails sent above this score when Brevo is configured).';
+}
+</script>
+</body>
+</html>
