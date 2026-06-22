@@ -6,32 +6,47 @@ A production-grade, self-hosted Security Operations Center (SOC) platform that o
 
 ## Architecture Overview
 
-```
-                        ┌─────────────────────────────────────┐
-                        │         Flask + SocketIO (ASGI)      │
-                        │         Eventlet Async Worker         │
-                        └────────────┬────────────────────────┘
-                                     │
-              ┌──────────────────────▼──────────────────────────┐
-              │              Risk Aggregation Engine             │
-              │   Parallel ThreadPoolExecutor across N sources   │
-              └──┬──────────┬───────────┬──────────┬────────────┘
-                 │          │           │          │
-          VirusTotal   SafeBrowsing  AbuseIPDB  RDAP/Whois
-                 │          │           │          │
-              └──┴──────────┴───────────┴──────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │   Gemini AI Reasoning    │
-                    │  (3-key rotation pool)   │
-                    │  429 → auto key swap     │
-                    └────────────┬────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │     MongoDB Atlas        │
-                    │  Persistent threat logs  │
-                    │  24h deduplication layer │
-                    └─────────────────────────┘
+```mermaid
+flowchart TD
+    User([User / Browser]) --> Dashboard[Flask Dashboard\nSocketIO Server]
+    Ext([Chrome Extension]) --> Dashboard
+
+    Dashboard --> URL[URL Scanner]
+    Dashboard --> QR[QR Analyzer]
+    Dashboard --> SOC[SOC Log Analyzer]
+    Dashboard --> Email[Email Phishing Scanner]
+    Dashboard --> File[File Hash Scanner]
+    Dashboard --> IP[IP / Domain Lookup]
+
+    URL --> AGG[Risk Aggregation Engine\nParallel ThreadPoolExecutor]
+    QR --> AGG
+
+    AGG --> VT[VirusTotal\n70+ engines]
+    AGG --> SB[Google Safe Browsing]
+    AGG --> RDAP[RDAP / Whois\nDomain Age]
+    AGG --> PT[PhishTank]
+
+    SOC --> RULE[Rule Engine\nBrute Force / Off-Hours\nImpossible Travel]
+    SOC --> ABIP[AbuseIPDB\nIP Reputation]
+
+    Email --> NLP[NLP Heuristics\nUrgency / Sender / URLs]
+    Email --> URLS[Threaded URL Scan]
+
+    VT --> GEMINI[Gemini AI Reasoning\n3-Key Rotation Pool\n429 Auto-Failover]
+    SB --> GEMINI
+    RULE --> GEMINI
+    NLP --> GEMINI
+    ABIP --> GEMINI
+
+    GEMINI --> MONGO[(MongoDB Atlas\nPersistent Storage\n24h Deduplication)]
+    URLS --> MONGO
+
+    MONGO --> FEED[Live SocketIO Feed]
+    MONGO --> ALERT[Brevo Email Alert]
+    MONGO --> MAP[Threat Map\nGeoIP Clustering]
+    MONGO --> REPORT[PDF Report]
+
+    FEED --> Dashboard
 ```
 
 ---
