@@ -1,147 +1,231 @@
 # AI-Powered Security Operations & Threat Intelligence Platform
 
-A self-hosted threat-detection dashboard that combines threat-intelligence APIs with Google Gemini to analyse URLs, QR codes, security logs, and Gmail inboxes for phishing and malware. It ships with a live web dashboard, a real-time detection feed, and email alerting.
+A production-grade, self-hosted Security Operations Center (SOC) platform that orchestrates multiple threat intelligence pipelines in parallel, correlates signals using a multi-source risk aggregation engine, and surfaces actionable verdicts via a real-time SocketIO dashboard. Integrates Google Gemini as an AI reasoning layer on top of commercial threat feeds.
 
-Every external integration degrades gracefully. If an API key is missing or a call fails, that source is skipped (logged as a warning) and the rest of the app keeps working.
+---
 
-## Features
+## Architecture Overview
 
-| Feature | What it does | Tab |
+```
+                        ┌─────────────────────────────────────┐
+                        │         Flask + SocketIO (ASGI)      │
+                        │         Eventlet Async Worker         │
+                        └────────────┬────────────────────────┘
+                                     │
+              ┌──────────────────────▼──────────────────────────┐
+              │              Risk Aggregation Engine             │
+              │   Parallel ThreadPoolExecutor across N sources   │
+              └──┬──────────┬───────────┬──────────┬────────────┘
+                 │          │           │          │
+          VirusTotal   SafeBrowsing  AbuseIPDB  RDAP/Whois
+                 │          │           │          │
+              └──┴──────────┴───────────┴──────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   Gemini AI Reasoning    │
+                    │  (3-key rotation pool)   │
+                    │  429 → auto key swap     │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │     MongoDB Atlas        │
+                    │  Persistent threat logs  │
+                    │  24h deduplication layer │
+                    └─────────────────────────┘
+```
+
+---
+
+## Feature Matrix
+
+| Module | Detection Pipeline | Storage | Real-time |
+|---|---|---|---|
+| URL Scanner | VT (70+ engines) + SafeBrowsing + RDAP age + Gemini reasoning | MongoDB `threat_logs` | SocketIO broadcast |
+| QR Analyzer | OpenCV decode → full URL pipeline | MongoDB `threat_logs` | SocketIO broadcast |
+| SOC Log Analyzer | Regex rule engine + AbuseIPDB IP reputation + Gemini ambiguity pass | MongoDB `soc_events` | SocketIO broadcast |
+| Email Phishing Scanner | Sender domain trust scoring + URL reputation (threaded) + urgency NLP heuristics + Gemini verdict | MongoDB `email_scans` | SocketIO broadcast |
+| IP/Domain Intelligence | RDAP, geolocation, ASN, abuse confidence | - | - |
+| File Hash Scanner | SHA-256/MD5/SHA-1 multi-hash + VirusTotal lookup | - | - |
+| Threat Map | GeoIP aggregation of attacker IPs across all scan types | - | Live clustering |
+| Chrome Extension | Background page scanner hitting the live backend API | - | - |
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Why |
 |---|---|---|
-| URL Check | Scores a URL using VirusTotal, Google Safe Browsing, RDAP domain age, and Gemini reasoning | URL Check |
-| QR Scan | Decodes a QR image, extracts the URL, and runs it through the URL pipeline | QR Scan |
-| SOC Log Analyzer | Rule-based detections (brute-force, off-hours, malicious IPs via AbuseIPDB) plus Gemini on ambiguous lines | SOC Analyzer |
-| Email Scanner | Reads a connected Gmail inbox and scores each message for phishing (URL reputation plus NLP heuristics) | Email Scanner |
-| Live Threat Feed | Real-time SocketIO feed of every detection, visible on all tabs | (always visible) |
-| Email Alerts | Sends an email via Brevo when a result crosses the risk threshold | (background) |
-| Settings | Green/red status of every configured service plus CSV export | Settings |
+| Runtime | Python 3.11 + eventlet | eventlet monkey-patches stdlib for async I/O without a full ASGI rewrite |
+| Web framework | Flask + Flask-SocketIO | Blueprint-per-feature architecture keeps each module independently testable |
+| Async worker | Gunicorn + eventlet worker class | Single-worker event loop; avoids threading conflicts with pymongo |
+| AI | Google Gemini (`gemini-2.0-flash-lite`, `gemini-2.5-flash`) | Different models per module based on context size and latency requirements |
+| Key management | 3-key rotation pool with 429 auto-failover | Extends free-tier daily quota 3x without any paid plan |
+| Database | MongoDB Atlas (cloud) | Survives ephemeral Render filesystem resets; indexed on timestamp + source_type |
+| Deduplication | 24-hour window per (source_type, input_value) | Prevents dashboard inflation from repeated identical scans |
+| QR decoding | OpenCV `cv2.QRCodeDetector` | Zero native system dependencies vs pyzbar (requires libiconv/zbar) |
+| Email alerting | Brevo REST API | SMTP blocked on Render free tier (ports 465/587 firewalled) |
+| Real-time feed | Socket.IO with eventlet async | Sub-100ms push to all connected clients on each detection |
+| Frontend | Vanilla HTML/CSS/JS + Socket.IO client | No build step; template served directly by Flask |
+| Uptime | UptimeRobot 5-min ping | Prevents Render free-tier 15-minute sleep |
 
-## Tech stack
+---
 
-- Backend: Python 3.11, Flask, Flask-SocketIO
-- Storage: SQLite (`threat_intel.db`, auto-created)
-- Frontend: plain HTML/CSS/JS (no framework), Socket.IO client
-- AI: Google Gemini (`gemini-2.5-flash`)
-- QR decoding: OpenCV (`cv2.QRCodeDetector`), which needs no system dependencies (chosen over pyzbar, which requires the native zbar/libiconv libs)
-
-## Project structure
+## Project Structure
 
 ```
-backend/
-  app.py                  # entry point: Flask + SocketIO, registers blueprints
-  config.py               # loads .env; is_configured(service) helper
-  realtime.py             # SocketIO broadcast helper for the live feed
-  requirements.txt
-  models/
-    database.py           # SQLite schema + insert helpers (emit live-feed events)
-  routes/                 # one blueprint per feature
-    dashboard.py  check_url.py  scan_qr.py  soc_analyzer.py
-    email_scanner.py  settings.py
-  services/               # one file per integration (swappable / disableable)
-    virustotal_service.py  safebrowsing_service.py  rdap_service.py
-    abuseipdb_service.py   gemini_service.py        risk_aggregator.py
-    log_analyzer.py        qr_service.py            gmail_service.py
-    email_phishing_service.py  alert_service.py
-  templates/dashboard.html
-  credentials/            # Gmail OAuth files (gitignored): credentials.json, token.json
-  sample_data/            # sample logs + QR images for testing
-.env                      # your real secrets (not committed)
-.env.example              # documented template
+.
+├── backend/
+│   ├── app.py                        # Flask app factory, blueprint registration, SocketIO init
+│   ├── config.py                     # Env loader, Gemini key rotation state, is_configured() guard
+│   ├── realtime.py                   # SocketIO broadcast helper + severity score map
+│   ├── requirements.txt
+│   ├── runtime.txt                   # Pins Python 3.11.9 for Render (prevents 3.14 auto-select)
+│   ├── models/
+│   │   └── database.py               # MongoDB client (lazy init), insert/read helpers, 24h dedup
+│   ├── routes/                       # One Flask Blueprint per feature
+│   │   ├── check_url.py              # /api/check-url, bulk scan, 24h cache layer
+│   │   ├── scan_qr.py                # /api/scan-qr, OpenCV decode + URL pipeline
+│   │   ├── soc_analyzer.py           # /api/analyze-logs, rule engine + AI pass
+│   │   ├── email_scanner.py          # /email_scanner/api/scan + scan-eml, dedup by sender+subject
+│   │   ├── geo.py                    # /api/geo-threats, GeoIP aggregation across collections
+│   │   ├── settings.py               # /api/stats, /api/feed, /api/history, /api/export CSV
+│   │   ├── ip_lookup.py              # /api/ip-lookup
+│   │   ├── file_scan.py              # /api/file-scan
+│   │   └── dashboard.py              # / → dashboard.html
+│   ├── services/                     # One file per external integration (all gracefully degrade)
+│   │   ├── risk_aggregator.py        # Parallel ThreadPoolExecutor fan-out + score fusion
+│   │   ├── gemini_service.py         # Gemini reasoning with 3-key rotation + fallback
+│   │   ├── virustotal_service.py
+│   │   ├── safebrowsing_service.py
+│   │   ├── abuseipdb_service.py
+│   │   ├── rdap_service.py
+│   │   ├── phishtank_service.py
+│   │   ├── email_phishing_service.py # NLP heuristics + threaded URL scan + Gemini verdict
+│   │   ├── log_analyzer.py           # Regex rule engine + AI-assisted ambiguous line detection
+│   │   ├── alert_service.py          # Brevo REST alert with risk-band HTML email
+│   │   ├── qr_service.py
+│   │   ├── geo_service.py
+│   │   ├── lookup_service.py
+│   │   ├── report_service.py         # FPDF2 PDF report generation
+│   │   └── mail_service.py
+│   ├── templates/
+│   │   └── dashboard.html            # Single-page app, SocketIO client, all feature UIs
+│   └── sample_data/                  # Sample QR images and log files for demo
+├── chrome-extension/
+│   ├── manifest.json                 # MV3 extension manifest
+│   ├── popup.html / popup.js         # Extension UI + backend API calls
+│   └── background.js
+├── .env.example                      # All configurable environment variables documented
+└── render.yaml                       # Render deployment config
 ```
 
-## Prerequisites
+---
 
-Python 3.11 (the project is tested on 3.11). On Windows, if you have multiple Python installs, make sure you install dependencies into and run the app with the same interpreter. Using a virtual environment (below) avoids this entirely.
+## Environment Variables
 
-## Setup
+```env
+# Gemini AI (3-key pool for quota rotation)
+GEMINI_API_KEY=
+GEMINI_API_KEY_2=
+GEMINI_API_KEY_3=
+
+# Threat Intelligence APIs
+VIRUSTOTAL_API_KEY=
+GOOGLE_SAFE_BROWSING_API_KEY=
+ABUSEIPDB_API_KEY=
+PHISHTANK_API_KEY=
+
+# MongoDB Atlas
+MONGO_URI=mongodb+srv://...
+
+# Email Alerting (Brevo REST)
+BREVO_API_KEY=
+ALERT_EMAIL_FROM=
+ALERT_EMAIL_TO=
+ALERT_THRESHOLD=70
+
+# App
+SECRET_KEY=
+DEBUG=false
+```
+
+All integrations degrade gracefully. The platform runs with zero keys using RDAP and heuristics only. Each key unlocks an additional detection layer.
+
+---
+
+## Local Setup
 
 ```bash
-# 1. From the project root, create and activate a virtual environment
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
+# Requires Python 3.11 exactly (eventlet 0.37.0 is incompatible with 3.12+)
+python3.11 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-# 2. Install dependencies
 pip install -r backend/requirements.txt
 
-# 3. Create your .env from the template and fill in keys
-cp .env.example .env        # Windows: copy .env.example .env
+cp .env.example .env               # Fill in keys
+cd backend && python app.py
 ```
 
-Then edit `.env` (see the key guide below). You can run with zero keys. The app still works using RDAP (free, no key) and rule-based heuristics, and the AI and commercial sources activate as you add keys.
+Open `http://localhost:5000`
 
-## API keys: what each unlocks and where to get it
+---
 
-All keys go in `.env`. The dashboard Settings tab shows a green/red dot for each.
+## Deployment
 
-| Key | Unlocks | Without it | Get it from |
-|---|---|---|---|
-| `GEMINI_API_KEY` | AI risk scoring and written reasoning on URLs, QR, email, logs | Falls back to weighted average of other sources / rules only | https://aistudio.google.com/app/apikey (free) |
-| `VIRUSTOTAL_API_KEY` | Multi-engine (70+) URL/file reputation | URL pipeline skips VT | https://www.virustotal.com/gui/my-apikey (free) |
-| `GOOGLE_SAFE_BROWSING_API_KEY` | Google's blocklist of malicious URLs | URL pipeline skips Safe Browsing | Google Cloud Console, enable "Safe Browsing API", create API key |
-| `ABUSEIPDB_API_KEY` | Malicious-IP reputation in SOC logs (impossible-travel, known-bad IPs) | Those log rules skip | https://www.abuseipdb.com/account/api (free) |
-| `GMAIL_CREDENTIALS_PATH` | Gmail inbox phishing scanning | Email Scanner disabled | Google Cloud Console OAuth (see below) |
-| `BREVO_API_KEY` + `ALERT_EMAIL_FROM`/`TO` | Email alerts above `ALERT_THRESHOLD` | Alerts are logged as "would have sent", not emailed | https://app.brevo.com/settings/keys/api (free tier) |
-| `PHISHTANK_API_KEY` | Optional community phishing DB | Skipped (new keys are closed by Cisco) | n/a |
+Deployed on Render (Python 3.11.9, gunicorn + eventlet worker). MongoDB on Atlas free tier (M0). UptimeRobot pings every 5 minutes to prevent cold starts.
 
-`ALERT_THRESHOLD` (default `70`) controls the score at or above which an alert fires.
-
-RDAP (domain-age checks) needs no key and always runs.
-
-## Gmail setup (read-only inbox scanning)
-
-This requests READ access to a real Gmail inbox. The app can only read recent messages. It cannot send, delete, or modify anything. Use a throwaway or test Gmail account first if you are unsure. You can revoke access anytime at https://myaccount.google.com/permissions.
-
-1. In Google Cloud Console, create a project and enable the Gmail API.
-2. Configure the OAuth consent screen (Google Auth Platform):
-   - User type External, publishing status Testing.
-   - Under Audience > Test users, add the exact Gmail address you will scan.
-3. Credentials > Create credentials > OAuth client ID > Desktop app. Download the JSON.
-4. Save it as `backend/credentials/credentials.json`.
-5. Start the app, open the Email Scanner tab, click Connect Gmail. A browser window opens. Choose the test account, click Advanced > Go to ... (unsafe), which is normal for your own unverified test app, then click Allow. A `token.json` is cached so you will not re-auth.
-
-In Testing mode the OAuth refresh token expires after about 7 days. If scanning stops working, delete `backend/credentials/token.json` and click Connect Gmail again.
-
-## Running
-
-```bash
-cd backend
-python app.py
+```
+gunicorn -k eventlet -w 1 --timeout 120 --bind 0.0.0.0:$PORT app:app
 ```
 
-Open http://localhost:5000/dashboard.
+Key deployment constraints solved:
+- Render blocks SMTP (465/587) on free tier — solved by Brevo REST API
+- Render filesystem is ephemeral — solved by MongoDB Atlas for all scan storage
+- Gemini free tier quota exhaustion — solved by 3-key round-robin rotation with 429 auto-failover
+- Python version mismatch (Render defaults to 3.14) — solved by `runtime.txt` in root directory
 
-The server starts on port 5000 with SocketIO. `threat_intel.db` is created on first run.
+---
 
-## Using it
+## Detection Logic
 
-- URL Check: paste a URL, click Check URL. Tick force refresh to bypass the 1-hour cache.
-- QR Scan: drag/drop or pick a QR image (try `backend/sample_data/qr_test_malicious.png`).
-- SOC Analyzer: paste logs or upload a file (try `backend/sample_data/*.log`).
-- Email Scanner: Connect Gmail, then Scan inbox.
-- Live Threat Feed (right column): updates in real time as detections happen.
-- Settings: see which services are active, export `threat_logs`, `soc_events`, `email_scans` as CSV.
+### URL Risk Score Fusion
 
-### Try a phishing detection
+Each source returns a 0-100 score. The aggregator runs all sources in parallel threads and fuses results:
 
-Send yourself an email containing urgency language and a lookalike link (for example `http://secure-paypa1-login.tk/verify`), then click Scan inbox. With Gemini and Safe Browsing on, it should score as Phishing.
+```
+final_score = weighted_average([vt, safebrowsing, phishtank, rdap_age_penalty])
+            → passed to Gemini with evidence JSON for contextual reasoning
+            → Gemini returns: risk_score, threat_label, reasoning, contributing_factors[]
+```
 
-## Security notes
+### SOC Log Analysis (Two-pass)
 
-- Secrets: `.env` and `backend/credentials/` are for local secrets only. Keep them out of version control. `backend/credentials/.gitignore` already excludes the JSON files, and the root `.gitignore` excludes `.env`.
-- Gmail: read-only scope (`gmail.readonly`). Revoke at https://myaccount.google.com/permissions. Prefer a test account.
-- This is a self-hosted single-operator tool, not a multi-tenant SaaS. Serving it to other users would require publishing the OAuth app (Google verification) and per-user token storage.
-- The bundled Flask dev server is for local use. Put a real WSGI server in front for anything public.
+**Pass 1 — Rule engine:**
+- Brute force: 5+ failed logins from same IP
+- Off-hours access: successful login between 00:00-05:59
+- Known malicious IP: AbuseIPDB confidence score
+- Impossible travel: same user, logins from 2+ countries
 
-## Troubleshooting
+**Pass 2 — AI pass (capped at 8 lines):**
+- Ambiguous lines matching keywords (sudo, privilege, escalat, exploit...) sent to Gemini
+- Returns: line_index, severity, category, explanation per suspicious line
 
-| Symptom | Cause / fix |
-|---|---|
-| `{{ db_status }}` shows literally in the browser | You are viewing the template file directly. Open the Flask URL http://localhost:5000/dashboard, not the `.html` file. |
-| `ModuleNotFoundError` on start | Deps installed into a different Python than you are running. Use a venv. |
-| Email Scanner says "not connected" | `credentials.json` missing, or token expired (delete `token.json`, reconnect). |
-| VirusTotal not shown in a URL's sources | VT only has data on previously-seen URLs. A brand-new or fabricated domain returns no verdict. |
-| Live feed empty | It populates on activity, so run any scan. Requires the page to reach `cdn.socket.io` (internet). |
-| Alerts never arrive | Brevo not configured, or score below `ALERT_THRESHOLD`. Check server logs for "WOULD have emailed". |
+### Email Phishing Pipeline
+
+```
+1. Sender domain trust check (whitelist of 30+ known providers)
+2. URL extraction → parallel VirusTotal/SafeBrowsing scan (max 5 URLs, threaded)
+3. NLP urgency heuristics (12 regex patterns: account suspension, verify identity, etc.)
+4. Reply-To domain mismatch detection
+5. Risky attachment extension check (.exe, .js, .vbs, .iso, .lnk, .docm...)
+6. Raw IP link detection
+7. Gemini final verdict with full evidence bundle
+```
+
+---
+
+## Chrome Extension
+
+MV3 extension. Reads the current tab URL and sends it to the configured backend. Displays risk score, threat label, and sources inline in the popup. Caches results per URL.
+
+Configure backend URL in extension settings (default: `http://localhost:5000`).
