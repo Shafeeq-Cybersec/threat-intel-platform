@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -986,8 +986,8 @@ async function loadThreatMap() {
     }
     if (!_map) {
         _map = L.map('threatMap', { attributionControl:false, worldCopyJump:true }).setView([20, 0], 2);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 10, subdomains: 'abcd'
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 16
         }).addTo(_map);
         _mapLayer = L.layerGroup().addTo(_map);
     }
