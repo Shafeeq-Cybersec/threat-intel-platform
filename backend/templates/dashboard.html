@@ -858,16 +858,20 @@ function loadBulkSample() {
 }
 function loadSocSample() {
     document.getElementById('logText').value = [
-        'Jun 22 02:14:01 srv sshd[2211]: Failed password for admin from 45.33.32.156 port 50122 ssh2',
-        'Jun 22 02:14:03 srv sshd[2212]: Failed password for admin from 45.33.32.156 port 50124 ssh2',
-        'Jun 22 02:14:05 srv sshd[2213]: Failed password for admin from 45.33.32.156 port 50126 ssh2',
-        'Jun 22 02:14:07 srv sshd[2214]: Failed password for admin from 45.33.32.156 port 50128 ssh2',
-        'Jun 22 02:14:09 srv sshd[2215]: Failed password for admin from 45.33.32.156 port 50130 ssh2',
-        'Jun 22 02:14:11 srv sshd[2216]: Failed password for admin from 45.33.32.156 port 50132 ssh2',
-        'Jun 22 03:02:55 srv sshd[3001]: Accepted password for root from 185.220.101.45 port 41122 ssh2',
+        'Oct 03 10:15:01 srv sshd[2211]: Failed password for admin from 203.0.113.25 port 50122 ssh2',
+        'Oct 03 10:15:04 srv sshd[2212]: Failed password for admin from 203.0.113.25 port 50124 ssh2',
+        'Oct 03 10:15:07 srv sshd[2213]: Failed password for admin from 203.0.113.25 port 50126 ssh2',
+        'Oct 03 10:15:10 srv sshd[2214]: Accepted password for admin from 203.0.113.25 port 50128 ssh2',
+        'Oct 03 10:16:02 srv sudo: admin : TTY=pts/0 ; PWD=/home/admin ; USER=root ; COMMAND=/bin/id',
+        'Jun 22 02:14:01 srv sshd[3001]: Failed password for root from 185.220.101.45 port 41120 ssh2',
+        'Jun 22 02:14:03 srv sshd[3002]: Failed password for root from 185.220.101.45 port 41122 ssh2',
+        'Jun 22 02:14:05 srv sshd[3003]: Failed password for root from 185.220.101.45 port 41124 ssh2',
+        'Jun 22 02:14:07 srv sshd[3004]: Failed password for root from 185.220.101.45 port 41126 ssh2',
+        'Jun 22 02:14:09 srv sshd[3005]: Accepted password for root from 185.220.101.45 port 41128 ssh2',
         'Jun 22 14:31:20 srv sudo: contractor : command not allowed ; TTY=pts/1 ; USER=root ; COMMAND=/bin/su'
     ].join('\n');
 }
+
 
 // File / hash scanner
 const FILE_VERDICT = {

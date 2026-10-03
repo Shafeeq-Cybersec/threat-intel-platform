@@ -17,18 +17,27 @@ _OK_KW = ("accepted password", "session opened", "login successful", "accepted p
 # lines worth escalating to the AI when no rule fired
 _AMBIG_KW = ("sudo", "root", "privilege", "escalat", "unusual", "anomal", "warning", "error", "denied", "exploit", "malware")
 
-_FAIL_THRESHOLD = 5          # failed logins from one IP => brute force
-_OFF_HOURS = range(0, 6)     # 00:00–05:59 local
+_FAIL_THRESHOLD = 3          # failed logins from one IP => brute force (lowered from 5)
+_OFF_HOURS = range(0, 6)     # 00:00-05:59 local
 _MAX_IP_LOOKUPS = 25         # cap AbuseIPDB calls per run
 _MAX_AI_LINES = 8            # cap Gemini calls per run
 
 _SEV_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+# Regex: "sudo: <user> : ... USER=root ; COMMAND=/path"
+_SUDO_RE = re.compile(
+    r"sudo\s*:.*?(?P<user>\S+)\s+:.*?USER=(?P<as_user>\S+)\s*;.*?COMMAND=(?P<cmd>\S+)",
+    re.I
+)
+# Also catch "sudo: <user> : command not allowed"
+_SUDO_DENIED_RE = re.compile(r"sudo\s*:.*?command not allowed", re.I)
 
 
 def _parse(line: str) -> dict:
     ip_m = _IP_RE.search(line)
     user_m = _USER_RE.search(line)
     hour_m = _HOUR_RE.search(line)
+    sudo_m = _SUDO_RE.search(line)
     low = line.lower()
     return {
         "raw": line.strip(),
@@ -37,6 +46,11 @@ def _parse(line: str) -> dict:
         "hour": int(hour_m.group(1)) if hour_m else None,
         "failed": any(k in low for k in _FAIL_KW),
         "ok": any(k in low for k in _OK_KW),
+        # sudo escalation fields
+        "sudo_user": sudo_m.group("user") if sudo_m else None,
+        "sudo_as":   sudo_m.group("as_user") if sudo_m else None,
+        "sudo_cmd":  sudo_m.group("cmd") if sudo_m else None,
+        "sudo_denied": bool(_SUDO_DENIED_RE.search(line)),
     }
 
 
@@ -46,6 +60,7 @@ def _rule_based(parsed: list) -> tuple:
     flagged_idx = set()
 
     fails_by_ip = defaultdict(list)
+    success_by_ip = defaultdict(list)   # ip -> list of indices with successful logins
     logins_by_user = defaultdict(set)   # user -> set of countries (needs AbuseIPDB)
     unique_ips = []
 
@@ -54,18 +69,49 @@ def _rule_based(parsed: list) -> tuple:
             unique_ips.append(p["ip"])
         if p["failed"] and p["ip"]:
             fails_by_ip[p["ip"]].append(i)
+        if p["ok"] and p["ip"]:
+            success_by_ip[p["ip"]].append(i)
+
         # Rule: off-hours successful access
         if p["ok"] and p["hour"] is not None and p["hour"] in _OFF_HOURS:
             events.append(_mk(p["raw"], "medium", "Off-Hours Access",
                              f"Successful login at {p['hour']:02d}:xx (outside business hours).", False))
             flagged_idx.add(i)
 
-    # Rule: brute force
+        # Rule: Privilege Escalation - sudo command executed as root
+        if p["sudo_user"] and p["sudo_as"] and p["sudo_as"].lower() == "root" and p["sudo_cmd"]:
+            events.append(_mk(p["raw"], "high", "Privilege Escalation",
+                              f"User '{p['sudo_user']}' ran '{p['sudo_cmd']}' as root via sudo.", False))
+            flagged_idx.add(i)
+
+        # Rule: Privilege Escalation - sudo denied / command not allowed
+        elif p["sudo_denied"] and i not in flagged_idx:
+            events.append(_mk(p["raw"], "medium", "Privilege Escalation Attempt",
+                              "Unauthorized sudo command attempted but was denied.", False))
+            flagged_idx.add(i)
+
+    # Rule: brute force (3+ failures from same IP)
     for ip, idxs in fails_by_ip.items():
         if len(idxs) >= _FAIL_THRESHOLD:
             flagged_idx.update(idxs)
             events.append(_mk(parsed[idxs[0]]["raw"], "high", "Brute Force / Credential Stuffing",
                              f"{len(idxs)} failed login attempts from {ip}.", False))
+
+    # Rule: Account Takeover - failed attempts followed by success from same IP
+    for ip, ok_idxs in success_by_ip.items():
+        fail_idxs = fails_by_ip.get(ip, [])
+        if not fail_idxs:
+            continue
+        for ok_i in ok_idxs:
+            preceding_fails = [fi for fi in fail_idxs if fi < ok_i]
+            if preceding_fails:
+                success_line = parsed[ok_i]["raw"]
+                events.append(_mk(success_line, "critical", "Account Takeover",
+                                  f"Successful login from {ip} after {len(preceding_fails)} "
+                                  f"failed attempt(s) - possible brute-force account compromise.", False))
+                flagged_idx.update(preceding_fails)
+                flagged_idx.add(ok_i)
+                break  # one event per IP is enough
 
     # Rule: known-malicious IPs (+ country collection for impossible-travel)
     for ip in unique_ips[:_MAX_IP_LOOKUPS]:

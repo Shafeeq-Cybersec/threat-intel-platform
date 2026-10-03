@@ -30,7 +30,11 @@ _CATEGORY_MAP = {
     "off-hours access": "T1078",
     "known malicious ip": "T1071",
     "impossible travel": "T1078",
+    "account takeover": "T1110.004",
+    "privilege escalation": "T1548",
+    "privilege escalation attempt": "T1548",
 }
+
 
 # Keyword fallback for AI-generated categories / free-text
 _KEYWORD_MAP = [
