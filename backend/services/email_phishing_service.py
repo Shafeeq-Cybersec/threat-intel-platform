@@ -58,7 +58,7 @@ _RISKY_ATTACH = (
     ".iso", ".lnk", ".docm", ".xlsm", ".pptm", ".ps1", ".hta",
 )
 
-_GEMINI_MODEL = "gemini-2.5-flash"
+_GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 def _root_domain(host: str) -> str:
@@ -110,7 +110,7 @@ def _gemini_verify(sender: str, subject: str, body: str,
                    heuristic_score: int) -> dict | None:
     if not config.is_configured("gemini"):
         return None
-    import google.generativeai as genai
+    from google import genai as _genai
     evidence = {
         "sender": sender, "subject": subject,
         "body_excerpt": body[:2000].strip(),
@@ -137,8 +137,8 @@ def _gemini_verify(sender: str, subject: str, body: str,
     )
     for attempt in range(len(config._GEMINI_KEYS) or 1):
         try:
-            genai.configure(api_key=config.get_gemini_key())
-            resp = genai.GenerativeModel(_GEMINI_MODEL).generate_content(prompt)
+            client = _genai.Client(api_key=config.get_gemini_key())
+            resp = client.models.generate_content(model=_GEMINI_MODEL, contents=prompt)
             result = _parse_json(resp.text)
             score = max(0, min(int(result.get("phishing_score", heuristic_score)), 100))
             label = result.get("label", _label(score))

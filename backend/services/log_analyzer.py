@@ -146,7 +146,7 @@ def _ai_assisted(parsed: list, flagged_idx: set) -> list:
     if not candidates:
         return []
 
-    import google.generativeai as genai
+    from google import genai as _genai
     prompt = (
         "You are a SOC analyst. For each numbered security log line, decide if it is suspicious. "
         "Respond with ONLY a JSON array; one object per SUSPICIOUS line you find, with keys: "
@@ -157,8 +157,8 @@ def _ai_assisted(parsed: list, flagged_idx: set) -> list:
     verdicts = []
     for attempt in range(len(config._GEMINI_KEYS) or 1):
         try:
-            genai.configure(api_key=config.get_gemini_key())
-            resp = genai.GenerativeModel("gemini-2.0-flash-lite").generate_content(prompt)
+            client = _genai.Client(api_key=config.get_gemini_key())
+            resp = client.models.generate_content(model="gemini-3.5-flash-lite", contents=prompt)
             m = re.search(r"\[.*\]", resp.text, re.DOTALL)
             verdicts = json.loads(m.group(0)) if m else []
             break

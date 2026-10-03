@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import config
 
 log = logging.getLogger(__name__)
-_MODEL = "gemini-2.0-flash-lite"
+_MODEL = "gemini-3.5-flash-lite"
 _VALID_LABELS = {"Phishing", "Malware", "Safe", "Suspicious", "Unknown"}
 
 # Heuristic phishing signals used when the AI is unavailable
@@ -132,7 +132,7 @@ def assess(url: str, other_results: list) -> dict:
         log.warning("[gemini] no API key, using heuristic fallback")
         return _fallback(other_results, url, "not_configured")
 
-    import google.generativeai as genai
+    from google import genai as _genai
     evidence = [{"source": r["source"], "malicious": r["malicious"], "score": r["score"]}
                 for r in other_results if r]
     prompt = (
@@ -147,8 +147,8 @@ def assess(url: str, other_results: list) -> dict:
     )
     for attempt in range(len(config._GEMINI_KEYS) or 1):
         try:
-            genai.configure(api_key=config.get_gemini_key())
-            resp = genai.GenerativeModel(_MODEL).generate_content(prompt)
+            client = _genai.Client(api_key=config.get_gemini_key())
+            resp = client.models.generate_content(model=_MODEL, contents=prompt)
             result = _parse_json(resp.text)
             score = int(result.get("risk_score", 0))
             label = result.get("threat_label", "Unknown")
